@@ -1,1 +1,17 @@
 @import "tailwindcss";
+
+@keyframes flowAnimation {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animated-edge-path {
+  stroke-dasharray: 20 80 !important;
+  animation: flowAnimation 1.5s linear infinite !important;
+  filter: drop-shadow(0 0 5px rgba(0,188,212,0.8));
+  stroke-linecap: round;
+}

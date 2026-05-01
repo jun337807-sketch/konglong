@@ -1,5 +1,5 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import { DIRECTOR_PROMPT, ART_PROMPT, STORYBOARD_PROMPT, STYLE_SPELLS } from "../config/prompts";
+import { DIRECTOR_PROMPT, ART_PROMPT, STORYBOARD_PROMPT, STYLE_SPELLS, MEGA_BREAKDOWN_PROMPT, SCRIPT_REVIEW_MOTHER_PROMPT, SCRIPT_REVIEW_EXECUTE_PROMPT, SCRIPT_REVIEW_REPAIR_PROMPT } from "../config/prompts";
 
 // Initialize the Google Gen AI client lazily
 let aiClient: GoogleGenAI | null = null;
@@ -379,11 +379,78 @@ Output strictly in JSON format:
 }
 
 /**
- * 运行导演分析：解析剧本中的角色和场景
+ * 运行剧本审核
+ * @param type 审核类型：全剧本、场次、Beat、定点返修
+ * @param params 输入参数
+ */
+export async function runScriptReview(
+  type: 'full' | 'scene' | 'beat' | 'repair',
+  params: {
+    text: string;
+    prevContext?: string;
+    nextContext?: string;
+    problem?: string;
+    reviewOptions?: {
+      compliance?: boolean;
+      dialogue?: boolean;
+    };
+  },
+  onProgress?: (node: number, text: string) => void,
+  preferredModel: string = "auto",
+  signal?: AbortSignal
+) {
+  try {
+    console.log(`=== [API Request] Script Review Pipeline Started (Model: ${preferredModel}) ===`);
+    
+    // Determine which prompt to use
+    let systemInstruction = SCRIPT_REVIEW_MOTHER_PROMPT;
+    let payload = "";
+    
+    if (params.reviewOptions) {
+      if (params.reviewOptions.compliance === false) {
+        systemInstruction += "\n\n【选项覆盖】本轮审查中，请*忽略*并*取消*“内容合规风险”相关的审查。";
+      }
+      if (params.reviewOptions.dialogue === false) {
+        systemInstruction += "\n\n【选项覆盖】本轮审查中，请*忽略*并*取消*“台词逻辑与OS内心独白”相关的审查。";
+      }
+    }
 
- * @param scriptText 剧本内容
- * @param options 分析维度配置
- * @returns 解析后的 JSON 对象
+    if (type === 'repair') {
+      systemInstruction += "\n\n" + SCRIPT_REVIEW_REPAIR_PROMPT;
+      payload = `【用户指出的问题】\n${params.problem}\n\n【原文片段】\n${params.text}`;
+      if (params.prevContext || params.nextContext) {
+        payload += `\n\n【前后文摘要】\n上一部分：${params.prevContext || '无'}\n下一部分：${params.nextContext || '无'}`;
+      }
+    } else {
+      systemInstruction += "\n\n" + SCRIPT_REVIEW_EXECUTE_PROMPT;
+      if (type === 'full') {
+        payload = `【上传剧本文本】\n${params.text}`;
+      } else if (type === 'scene') {
+        payload = `【当前场次文本】\n${params.text}\n\n【上一场摘要】\n${params.prevContext || '无'}\n\n【下一场摘要】\n${params.nextContext || '无'}`;
+      } else if (type === 'beat') {
+        systemInstruction += "\n\n【输入类型标记】分镜 Beat 脚本。";
+        payload = `【Beat 脚本文本】\n${params.text}`;
+      }
+    }
+
+    const modelToUse = preferredModel === "auto" ? PRO_MODEL : preferredModel;
+
+    // Use a single call for simplicity since the backend handles sizes better now.
+    if (onProgress) onProgress(1, `🎬 剧本审核中...`);
+    
+    const response = await callGeminiWithFallback(systemInstruction, payload, `剧本审核-${type}`, true, modelToUse, signal, true);
+    const parsed = cleanAndParseJSON(response.text || "");
+    
+    return parsed;
+  } catch (error) {
+    console.error("Script Review Error:", error);
+    throw error;
+  }
+}
+
+
+/**
+ * 运行导演分析：解析剧本中的角色和场景
  */
 export async function runDirectorAnalysis(
   scriptText: string, 
@@ -393,78 +460,24 @@ export async function runDirectorAnalysis(
   signal?: AbortSignal
 ) {
   try {
-    console.log(`=== [API Request] Director Analysis Pipeline Started (Model: ${preferredModel}) ===`);
-    
-    // 动态构建指令，根据用户选择的功能维度进行强调
-    let systemInstruction = DIRECTOR_PROMPT;
-    if (options) {
-      const { genre, style, aspectRatio, ...modules } = options;
-      const enabledModules = Object.entries(modules)
-        .filter(([_, v]) => v)
-        .map(([k]) => {
-          const mapping: any = {
-            causalLoop: "机制 1：因果闭环与物理动作缝合",
-            entityConcretization: "机制 2：实体绝对具象化",
-            propAndPersonTracking: "机制 3：道具与人员的存在性追踪",
-            safetySubstitution: "机制 4：视听平替与安全合规",
-            spatialAnchoring: "机制 5：空间层级绑定与物理锚点锁定",
-            rhetoricStripping: "机制 6：修辞剥离与情绪肌肉化直译",
-            microExpression: "机制 7：微表情与全情绪肌肉化映射法则"
-          };
-          return mapping[k] || k;
-        })
-        .join('、');
-      
-      systemInstruction += `\n\n【剧本基础设定】\n- 题材：${genre || '未指定'}\n- 视觉风格：${style || '未指定'}\n- 画面比例：${aspectRatio || '9:16'}\n\n【当前任务重点】\n用户已在控制中心启用了以下核心机制：[${enabledModules}]。请在分析过程中给予这些维度最高优先级的关注，并在诊断报告中详细体现。同时，请确保所有润色和建议都符合上述【剧本基础设定】。`;
-    }
-
-    // 确定初始模型
-    const initialModel = preferredModel === "auto" ? PRO_MODEL : preferredModel;
-
-    // 切片模式：直接将剧本分块，每块独立进行完整的导演分析
-    const chunks = splitTextIntoChunks(scriptText, 1500);
-    
-    let aggregatedDiagnosticReport = "";
-    let aggregatedFixingStrategy = "";
-    let finalAiReadyScript: string[] = [];
-    let lastThoughts = "";
-
-    for (let i = 0; i < chunks.length; i++) {
-      if (signal?.aborted) throw new Error("Task cancelled by user");
-      
-      if (onProgress) onProgress(i + 1, `🎬 剧本切片分析中 (处理中 ${i + 1}/${chunks.length})...`);
-      
-      const chunkPrompt = `【当前场景切片 (${i+1}/${chunks.length})】\n请严格按照系统指令中的【四大核心清洗机制】对以下剧本切片进行深度清洗和重构。输出必须严格遵循 JSON 格式。\n\n【剧本切片正文】\n${chunks[i]}`;
-      
-      const chunkResponse = await callGeminiWithFallback(systemInstruction, chunkPrompt, `切片分析-${i+1}`, true, initialModel, signal, true);
-      const chunkParsed = cleanAndParseJSON(chunkResponse.text || "");
-      
-      if (chunkParsed) {
-        if (chunkParsed.diagnosticReport) {
-          aggregatedDiagnosticReport += `\n\n--- 切片 ${i+1} 诊断 ---\n${chunkParsed.diagnosticReport}`;
-        }
-        if (chunkParsed.fixingStrategy) {
-          aggregatedFixingStrategy += `\n\n--- 切片 ${i+1} 状态封存 ---\n${chunkParsed.fixingStrategy}`;
-        }
-        if (chunkParsed.thoughts) {
-          lastThoughts = chunkParsed.thoughts;
-        }
-        
-        if (Array.isArray(chunkParsed.aiReadyScript)) {
-          finalAiReadyScript.push(...chunkParsed.aiReadyScript);
-        } else if (typeof chunkParsed.aiReadyScript === 'string') {
-          finalAiReadyScript.push(chunkParsed.aiReadyScript);
-        }
+    const ai = getAIClient();
+    console.log(`=== [API Request] Director Analysis Pipeline Started ===`);
+    let systemInstruction = "你是一个专业剧本分析师，请根据剧本返回 JSON 格式分析。\n{\"diagnosticReport\": \"\", \"fixingStrategy\": \"\", \"thoughts\": \"\", \"aiReadyScript\": [\"\"]}";
+    const response = await ai.models.generateContent({
+      model: preferredModel === "auto" ? "gemini-3-flash-preview" : preferredModel, // Just using flash to be safe in backup
+      contents: { role: "user", parts: [{ text: scriptText }] },
+      config: {
+        systemInstruction: { role: "system", parts: [{ text: systemInstruction }] },
+        responseMimeType: "application/json"
       }
-    }
-    
-    console.log("=== Director Analysis Slice Processing Completed ===");
+    });
 
+    const chunkParsed = cleanAndParseJSON(response.text || "{}");
     return {
-      thoughts: lastThoughts,
-      diagnosticReport: aggregatedDiagnosticReport.trim(),
-      fixingStrategy: aggregatedFixingStrategy.trim(),
-      aiReadyScript: finalAiReadyScript.join('\n\n')
+      thoughts: chunkParsed.thoughts || "",
+      diagnosticReport: chunkParsed.diagnosticReport || "",
+      fixingStrategy: chunkParsed.fixingStrategy || "",
+      aiReadyScript: Array.isArray(chunkParsed.aiReadyScript) ? chunkParsed.aiReadyScript.join('\n\n') : (chunkParsed.aiReadyScript || scriptText)
     };
   } catch (error) {
     console.error("Director Analysis Error:", error);
@@ -474,6 +487,7 @@ export async function runDirectorAnalysis(
 
 /**
  * 运行美术设计：根据导演分析结果生成视觉资产描述
+
  * @param directorJsonData 导演分析的 JSON 结果
  * @param preferredModel 偏好模型
  * @param signal 中断信号
@@ -562,6 +576,83 @@ export async function runStoryboarding(
     return cleanAndParseJSON(response.text || "");
   } catch (error) {
     console.error("Storyboarding Error:", error);
+    throw error;
+  }
+}
+
+/**
+ * 图像生成：根据提示词和参考图生成图像
+ */
+export async function runImageGeneration(
+  prompt: string,
+  referenceImageBase64?: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const ai = getAIClient();
+  const parts: any[] = [];
+  
+  if (referenceImageBase64) {
+    const match = referenceImageBase64.match(/^data:(.+);base64,(.*)$/);
+    if (match) {
+      parts.push({
+        inlineData: {
+          mimeType: match[1],
+          data: match[2]
+        }
+      });
+    }
+  }
+  
+  parts.push({ text: prompt });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: { parts },
+    });
+
+    if (signal?.aborted) throw new Error("Task cancelled by user");
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:image/jpeg;base64,${part.inlineData.data}`;
+      }
+    }
+    
+    throw new Error("No image data found in response.");
+  } catch (error: any) {
+    console.error("Image Generation Error:", error);
+    throw new Error(getFriendlyErrorMessage(error));
+  }
+}
+
+export async function runMegaBreakdown(scriptContent: string, visualStyle: string = "电影感真实摄影，自然光线，真实空间质感，真实材质细节，克制的电影美术"): Promise<any> {
+  const ai = getAIClient();
+  const prompt = `${MEGA_BREAKDOWN_PROMPT}
+
+【用户上传剧本】
+${scriptContent}
+
+【指定视觉风格】
+${visualStyle}
+`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: PRO_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+      }
+    });
+
+    validateResponse(response, '剧本拆解与资产提取');
+    
+    const parsedData = cleanAndParseJSON(response.text!);
+    return parsedData;
+  } catch (error) {
+    console.error("Mega Breakdown generation failed:", error);
     throw error;
   }
 }
