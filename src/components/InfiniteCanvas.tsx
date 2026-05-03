@@ -25,6 +25,7 @@ import {
   getBezierPath
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import Markdown from 'react-markdown';
 import { 
   ImagePlus, Type, Film, BrainCircuit, LayoutGrid, X, 
   Play, Maximize, Download, Sun, SplitSquareHorizontal, 
@@ -59,7 +60,13 @@ const TextNode = ({ data, id, selected }: any) => {
   return (
     <>
       <NodeResizer color="#00bcd4" handleClassName={resizerHandleStyle} minWidth={240} minHeight={150} isVisible={selected} />
-      <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[240px] w-full h-full flex flex-col group`} onClick={() => setShowReviewMenu(false)}>
+      <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[240px] w-full h-full flex flex-col group relative`} onClick={() => setShowReviewMenu(false)}>
+        {data.isGenerating && (
+          <div className="absolute inset-0 bg-[#1A1A1A]/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center gap-3 z-50">
+             <Zap className={`animate-pulse ${data.generatingText?.includes('审查') ? 'text-rose-500' : 'text-[#00bcd4]'}`} size={24} />
+             <div className={`text-sm font-medium animate-pulse ${data.generatingText?.includes('审查') ? 'text-rose-500' : 'text-[#00bcd4]'}`}>{data.generatingText || '处理中...'}</div>
+          </div>
+        )}
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center gap-2 mb-3 text-zinc-400 pb-2 border-b border-zinc-800/50">
           <Type size={14} className={selected ? "text-[#00bcd4]" : ""} />
@@ -260,6 +267,12 @@ const ImageNode = ({ data, id, selected }: any) => {
       setIsPreviewOpen(true);
       return;
     }
+    if (action === 'hd-redraw') {
+      if (data.onAddNode) {
+        data.onAddNode('aiGenNode', 'singleFrameRepaint', undefined, id);
+      }
+      return;
+    }
     if (data.onAction) {
       data.onAction(id, action, payload);
     }
@@ -332,7 +345,7 @@ const ImageNode = ({ data, id, selected }: any) => {
              <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-[#242424] border border-zinc-800 rounded-lg shadow-xl w-32 py-1 z-[100] text-sm text-zinc-300">
                <button onClick={() => handleAction('hd-enhance')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">高清增强</button>
                <button onClick={() => handleAction('hd-expand')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">扩图</button>
-               <button onClick={() => handleAction('hd-redraw')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">重绘</button>
+               <button onClick={() => handleAction('hd-redraw')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">单帧重绘</button>
                <button onClick={() => handleAction('hd-erase')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">擦除</button>
              </div>
           )}
@@ -412,17 +425,6 @@ const ImageNode = ({ data, id, selected }: any) => {
               </div>
             )}
             
-            {/* Generate Video Action Button */}
-            <button 
-              onClick={(e) => { 
-                e.stopPropagation(); 
-                if (data.onAddNode) data.onAddNode('videoNode', 'generate-video', undefined, id); 
-              }} 
-              className="absolute bottom-3 right-3 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white text-xs rounded-lg opacity-0 group-hover/img:opacity-100 transition-opacity z-10 flex items-center gap-1.5 shadow-lg shadow-purple-500/20 backdrop-blur"
-            >
-              <Video size={14} /> 生成视频
-            </button>
-
             {data.isGenerating && (
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
                 <Sparkles className="text-[#00bcd4] animate-pulse mb-2" size={32} />
@@ -1105,6 +1107,115 @@ const AssetGroupNode = ({ data, id, selected }: any) => {
   );
 };
 
+const ReviewResultNode = ({ data, id, selected }: any) => {
+  const [activeTab, setActiveTab] = useState<'overall' | 'priority' | 'compliance' | 'format' | 'confirmation' | 'conclusion'>('overall');
+  const [isEditing, setIsEditing] = useState(false);
+
+  const tabs = [
+    { id: 'overall', label: '总体判断' },
+    { id: 'priority', label: '优先修复' },
+    { id: 'compliance', label: '合规与风险' },
+    { id: 'format', label: '格式与细节' },
+    { id: 'confirmation', label: '需确认方向' },
+    { id: 'conclusion', label: '审查结论' },
+  ];
+
+  const reportData = typeof data.reviewReport === 'object' && data.reviewReport !== null ? data.reviewReport : null;
+  const currentText = reportData ? reportData[activeTab] || '' : (data.reviewReport || '');
+
+  const handleEditChange = (e: any) => {
+    if (!data.onChangeField) return;
+    if (reportData) {
+      data.onChangeField(id, 'reviewReport', { ...reportData, [activeTab]: e.target.value });
+    } else {
+      data.onChangeField(id, 'reviewReport', e.target.value);
+    }
+  };
+
+  return (
+    <>
+      <NodeResizer color="#00bcd4" handleClassName={resizerHandleStyle} minWidth={450} minHeight={450} isVisible={selected} />
+      <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-0 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[450px] w-full h-full flex flex-col relative overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+        <Handle type="target" position={Position.Left} className={handleStyle} />
+        
+        {/* Header */}
+        <div className="flex items-center gap-2 p-3 bg-zinc-900/80 border-b border-zinc-800 shrink-0">
+          <Zap size={15} className="text-rose-400" />
+          <span className="text-sm font-bold tracking-wide text-zinc-200 flex-1">剧本审查报告</span>
+          <button 
+            onClick={(e) => { 
+                e.stopPropagation(); 
+                setIsEditing(!isEditing); 
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors border ${isEditing ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700'}`}
+          >
+            {isEditing ? <CheckCircle size={12} /> : <FileText size={12} />}
+            {isEditing ? '完成' : '编辑'}
+          </button>
+          <button 
+            onClick={(e) => { 
+                e.stopPropagation(); 
+                if (data.onAddNode) data.onAddNode('textNode', `script-review-${data.reviewType}`, undefined, data.sourceScriptId, { problem: data.problem });
+            }}
+            className="flex items-center gap-1 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/30 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors"
+          >
+            <RefreshCw size={11} />
+            从头重审
+          </button>
+        </div>
+
+        {/* Content Area */}
+        <div className="flex flex-col flex-1 min-h-0 bg-[#111214]">
+          {/* Tabs */}
+          {reportData && (
+            <div className="flex px-2 pt-2 border-b border-zinc-800/80 shrink-0 gap-1 overflow-x-auto custom-scrollbar">
+              {tabs.map(tab => (
+                <button 
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors border-b-2 whitespace-nowrap ${activeTab === tab.id ? 'border-rose-500 text-rose-400 bg-zinc-800/50' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex-1 min-h-0 relative p-3">
+            {isEditing ? (
+              <textarea
+                className="w-full h-full bg-zinc-900/50 border border-zinc-800/50 rounded-lg p-4 text-sm text-zinc-300 resize-none focus:outline-none focus:border-rose-500 transition-colors custom-scrollbar leading-relaxed"
+                value={currentText}
+                onChange={handleEditChange}
+                placeholder="审查报告内容..."
+              />
+            ) : (
+              <div className="bg-zinc-800/20 rounded-xl p-5 border border-zinc-800/50 h-full overflow-y-auto custom-scrollbar shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]">
+                 <div className="markdown-body text-sm text-zinc-300 leading-relaxed font-light">
+                    <Markdown>{currentText}</Markdown>
+                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-3 bg-zinc-900/80 border-t border-zinc-800 flex justify-end shrink-0 relative">
+          <button 
+            onClick={() => { if(data.onExportPolished) data.onExportPolished(id, data.sourceScriptId, data.aiScript) }}
+            className="w-full py-2.5 bg-gradient-to-r from-[#00bcd4] to-[#0092a8] hover:from-[#00cbe6] hover:to-[#00a2bb] text-white rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(0,188,212,0.2)]"
+          >
+            <Type size={16} />
+            一键输出润色版剧本
+          </button>
+        </div>
+
+        <Handle type="source" position={Position.Right} className={handleStyle} />
+      </div>
+    </>
+  );
+};
+
 const nodeTypes = {
   textNode: TextNode,
   imageNode: ImageNode,
@@ -1114,6 +1225,7 @@ const nodeTypes = {
   aiGenNode: AIGenNode,
   resultNode: ResultNode,
   assetGroupNode: AssetGroupNode,
+  reviewResultNode: ReviewResultNode,
 };
 
 const AnimatedEdge = ({
@@ -1156,6 +1268,7 @@ function Canvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [clipboard, setClipboard] = useState<{ type: 'node' | 'image', data: any } | null>(null);
   const [toast, setToast] = useState<{ message: string, visible: boolean }>({ message: '', visible: false });
+  const [globalProgress, setGlobalProgress] = useState<{ visible: boolean, text: string, progress: number }>({ visible: false, text: '', progress: 0 });
   const [activeSidebarPopover, setActiveSidebarPopover] = useState<'add' | 'assets' | null>(null);
   const [activeRightPanel, setActiveRightPanel] = useState<{ type: string, nodeId: string } | null>(null);
 
@@ -1365,6 +1478,51 @@ function Canvas() {
   const handleTextChange = useCallback((id: string, text: string) => {
     updateNodeData(id, 'text', text);
   }, [updateNodeData]);
+
+  const handleReviewFieldChange = useCallback((id: string, field: string, value: string) => {
+    updateNodeData(id, field, value);
+  }, [updateNodeData]);
+
+  const handleExportPolished = (id: string, sourceId: string, polishedText: string) => {
+    let progress = 10;
+    setGlobalProgress({ visible: true, text: '生成润色版文件...', progress });
+    const interval = setInterval(() => {
+      progress += 20;
+      if (progress >= 80) clearInterval(interval);
+      setGlobalProgress(prev => prev.visible ? { ...prev, progress } : prev);
+    }, 200);
+
+    setTimeout(() => {
+      clearInterval(interval);
+      setGlobalProgress({ visible: true, text: '输出完成！', progress: 100 });
+      setTimeout(() => setGlobalProgress(prev => ({ ...prev, visible: false })), 1500);
+
+      const newNodeId = `text-${Date.now()}`;
+      setNodes(nds => {
+        const node = nds.find(n => n.id === id);
+        if (!node) return nds;
+
+        const newNode = {
+          id: newNodeId,
+          type: 'textNode',
+          position: { x: node.position.x + 400, y: node.position.y },
+          style: { width: 320, height: 420 },
+          data: { text: polishedText, onChange: handleTextChange, onAddNode: addNode }
+        };
+        return nds.map(n => ({...n, selected: false})).concat({ ...newNode, selected: true } as any);
+      });
+      
+      setEdges(eds => eds.concat({
+        id: `e-${id}-${newNodeId}`,
+        source: id,
+        target: newNodeId,
+        type: 'animatedEdge',
+        animated: true,
+        style: { stroke: '#10b981', strokeWidth: 2 } // emerald-500
+      }));
+      showToast('输出润色版剧本成功');
+    }, 1000);
+  };
 
   const handleImageChange = useCallback((id: string, key: string, value: any) => {
     updateNodeData(id, key, value);
@@ -1596,6 +1754,51 @@ function Canvas() {
         };
         setNodes(nds => [...nds, newNode]);
         setEdges(eds => [...eds, { id: `e-${nodeId}-${newNodeId}`, source: nodeId, target: newNodeId, animated: true }]);
+      } else if (node.data.type === 'singleFrameRepaint') {
+        const imageNodes = inputNodes.filter(n => n?.type === 'imageNode');
+        if (imageNodes.length === 0) throw new Error("需要连接至少一张图片节点");
+        
+        const sortedImageNodes = [...imageNodes].sort((a, b) => (a?.position.x || 0) - (b?.position.x || 0));
+        const contents: any[] = [];
+        
+        sortedImageNodes.forEach((n, idx) => {
+          if (!n?.data.imageUrl) return;
+          const labelMap = ['图A', '图B', '图C', '图D'];
+          const label = idx < 4 ? labelMap[idx] : `额外图片${idx+1}`;
+          contents.push(`这是${label}:`);
+          const base64Data = n.data.imageUrl.split(',')[1];
+          const mimeType = n.data.imageUrl.split(';')[0].split(':')[1];
+          contents.push({ inlineData: { data: base64Data, mimeType } });
+        });
+        
+        import('../config/prompts').then(async ({ SINGLE_FRAME_REPAINT_PROMPT }) => {
+          try {
+            contents.push(SINGLE_FRAME_REPAINT_PROMPT);
+            const ai = getAIClient();
+            const response = await ai.models.generateContent({
+              model: 'gemini-3-flash-preview',
+              contents: contents
+            });
+            
+            // Generate a text node with the prompt
+            const textNodeId = `text-${Date.now()}`;
+            const newNode = {
+              id: textNodeId,
+              type: 'textNode',
+              position: { x: node.position.x, y: node.position.y + 200 },
+              style: { width: 400, height: 280 },
+              data: { text: response.text, onChange: handleTextChange },
+            };
+            setNodes(nds => [...nds, newNode]);
+            setEdges(eds => [...eds, { id: `e-${nodeId}-${textNodeId}`, source: nodeId, target: textNodeId, animated: true }]);
+          } catch(err: any) {
+            console.error("Single Frame Repaint failed:", err);
+            showToast(err.message || '生成重绘指令失败');
+          } finally {
+            updateNodeData(nodeId, 'isGenerating', false);
+          }
+        });
+        return; // Early return since we call updateNodeData in the promise
       }
     } catch (error: any) {
       console.error("AI Generation failed:", error);
@@ -1781,7 +1984,11 @@ function Canvas() {
 
   const addNode = (type: string, aiType?: string, pos?: { x: number, y: number }, sourceNodeId?: string, extraParams?: any) => {
     const id = `${type}-${Date.now()}`;
-    const position = pos || { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 };
+    const sourceNode = sourceNodeId ? getNode(sourceNodeId) : null;
+    const position = pos || { 
+      x: sourceNode ? sourceNode.position.x + (type === 'scriptNode' ? 500 : 400) : Math.random() * 200 + 100, 
+      y: sourceNode ? sourceNode.position.y : Math.random() * 200 + 100 
+    };
     
     // Auto-generate script audit
     if (aiType && aiType.startsWith('script-review') && sourceNodeId) {
@@ -1797,6 +2004,7 @@ function Canvas() {
       
       showToast('AI 正在审核剧本...');
       updateNodeData(sourceNodeId, 'isGenerating', true);
+      updateNodeData(sourceNodeId, 'generatingText', 'AI 正在审查剧本...');
       
       const sourceNode = getNode(sourceNodeId);
       const scriptText = sourceNode?.data?.text || "Unknown Script";
@@ -1818,54 +2026,103 @@ function Canvas() {
         }
       }
 
-      runScriptReview(rType, { text: scriptText, prevContext, nextContext, problem, reviewOptions })
+      setGlobalProgress({ visible: true, text: '初始化...', progress: 10 });
+      setTimeout(() => {
+        setGlobalProgress(prev => prev.visible ? { ...prev, text: '🎬 剧本审核中...', progress: 60 } : prev);
+      }, 500);
+
+      runScriptReview(rType as any, { 
+        text: scriptText as string, 
+        prevContext: prevContext as string, 
+        nextContext: nextContext as string, 
+        problem: problem as string, 
+        reviewOptions: reviewOptions as any
+      })
         .then((analysis) => {
+          setGlobalProgress(prev => ({ ...prev, text: '审核完成！', progress: 100 }));
+          setTimeout(() => setGlobalProgress(prev => ({ ...prev, visible: false })), 2000);
           updateNodeData(sourceNodeId, 'isGenerating', false);
           
           let resultText = "";
-          if (rType === 'repair') {
-            resultText = `【返修对象】\n${analysis.target || ''}\n\n【问题原因】\n${analysis.problemCause || ''}\n\n【修复后文本】\n${analysis.repairedText || ''}\n\n【需确认事项】\n${analysis.requiresConfirmation || '无'}`;
-          } else {
-            resultText = `【诊断报告】\n${analysis.diagnosticReport || ''}\n\n【修复策略】\n${analysis.fixingStrategy || ''}\n\n【机读剧本】\n${analysis.aiReadyScript || ''}\n\n【需确认事项】\n${analysis.requiresConfirmation || '无'}`;
+          let aiScript = analysis.ai_friendly_polished_script || analysis.aiReadyScript || '';
+          let reviewReport = analysis.review_report || analysis.diagnostic_report || analysis.diagnosticReport || '';
+          let strategy = analysis.fixing_strategy || analysis.fixingStrategy || '';
+          let confirmReq = analysis.client_confirmation_required || analysis.requiresConfirmation || '无';
+
+          if (!analysis.review_report && (reviewReport || strategy || confirmReq)) {
+             reviewReport = `### 第一部分：问题诊断报告\n${reviewReport}\n\n### 第二部分：修复方案\n${strategy}\n\n### 第三部分：需甲方确认事项\n${confirmReq}`;
           }
 
-          const newNode = { 
-            id, 
-            type: 'textNode', 
-            position: { x: position.x + 350, y: position.y }, 
-            style: { width: 440, height: 600 }, 
-            data: { 
-              text: resultText,
-              isReviewResult: true,
-              sourceId: sourceNodeId,
-              reviewType: rType,
-              problem: problem,
-              repairedText: analysis.repairedText || analysis.aiReadyScript,
-              onChange: handleTextChange, 
-              onAddNode: addNode,
-              onApplyRepair: (origId: string, repaired: string) => {
-                setNodes(currNds => currNds.map(n => {
-                  if (n.id === origId) {
-                    return { ...n, data: { ...n.data, text: repaired } };
-                  }
-                  return n;
-                }));
-                showToast("已将修复文本应用到原节点");
+          if (!aiScript && rType !== 'repair') {
+             throw new Error("生成失败：未返回 AI 友好润色版剧本");
+          }
+
+          if (rType === 'repair') {
+            resultText = `【返修对象】\n${analysis.target || ''}\n\n【问题原因】\n${analysis.problemCause || ''}\n\n【修复后文本】\n${analysis.repairedText || ''}\n\n【需确认事项】\n${confirmReq}`;
+            const newNode = { 
+              id, 
+              type: 'textNode', 
+              position: { x: position.x + 350, y: position.y }, 
+              style: { width: 440, height: 600 }, 
+              data: { 
+                text: resultText,
+                isReviewResult: true,
+                sourceId: sourceNodeId,
+                reviewType: rType,
+                problem: problem,
+                repairedText: analysis.repairedText || analysis.aiReadyScript,
+                onChange: handleTextChange, 
+                onAddNode: addNode,
+                onApplyRepair: (origId: string, repaired: string) => {
+                  setNodes(currNds => currNds.map(n => {
+                    if (n.id === origId) {
+                      return { ...n, data: { ...n.data, text: repaired } };
+                    }
+                    return n;
+                  }));
+                  showToast("已将修复文本应用到原节点");
+                }
+              } 
+            };
+            setNodes(nds => [...nds, newNode]);
+            setEdges(eds => [...eds, {
+              id: `e-${sourceNodeId}-${id}`,
+              source: sourceNodeId,
+              target: id,
+              animated: true,
+              style: { stroke: '#e11d48', strokeWidth: 2 } // rose-600
+            }]);
+          } else {
+            const newNode = {
+              id,
+              type: 'reviewResultNode',
+              position: { x: position.x + 350, y: position.y },
+              style: { width: 440, height: 600 },
+              data: {
+                reviewReport,
+                aiScript,
+                sourceScriptId: sourceNodeId,
+                reviewType: rType,
+                problem: problem,
+                onChangeField: handleReviewFieldChange,
+                onExportPolished: handleExportPolished,
+                onAddNode: addNode
               }
-            } 
-          };
-          
-          setNodes(nds => [...nds, newNode]);
-          setEdges(eds => [...eds, {
-            id: `e-${sourceNodeId}-${id}`,
-            source: sourceNodeId,
-            target: id,
-            animated: true,
-            style: { stroke: '#e11d48', strokeWidth: 2 } // rose-600
-          }]);
+            };
+            setNodes(nds => [...nds, newNode]);
+            setEdges(eds => [...eds, {
+              id: `e-${sourceNodeId}-${id}`,
+              source: sourceNodeId,
+              target: id,
+              animated: true,
+              style: { stroke: '#e11d48', strokeWidth: 2 } // rose-600
+            }]);
+          }
+
           showToast('剧本审核完成');
         })
         .catch(err => {
+          setGlobalProgress(prev => ({ ...prev, visible: false }));
           updateNodeData(sourceNodeId, 'isGenerating', false);
           showToast('审核失败：' + err.message);
         });
@@ -1875,15 +2132,28 @@ function Canvas() {
 
     // Auto-generate script breakdown
     if (aiType === 'director-breakdown' && sourceNodeId) {
-      showToast('AI 正在拆解剧本...');
-      updateNodeData(sourceNodeId, 'isGenerating', true);
+      setGlobalProgress({ visible: true, text: 'AI 正在拆解剧本...', progress: 10 });
+      
+      // Simulate progress
+      const interval = setInterval(() => {
+        setGlobalProgress(prev => {
+          if (!prev.visible) {
+            clearInterval(interval);
+            return prev;
+          }
+          const nextProgress = prev.progress + 15;
+          return { ...prev, progress: nextProgress > 85 ? 85 : nextProgress };
+        });
+      }, 800);
       
       const sourceNode = getNode(sourceNodeId!);
       const scriptText = sourceNode?.data?.text || "Unknown Script";
 
-      runMegaBreakdown(scriptText)
+      runMegaBreakdown(scriptText as string)
         .then((bd) => {
-          updateNodeData(sourceNodeId, 'isGenerating', false);
+          clearInterval(interval);
+          setGlobalProgress({ visible: true, text: '拆解完成！', progress: 100 });
+          setTimeout(() => setGlobalProgress(prev => ({ ...prev, visible: false })), 2000);
           
           const mappedBreakdown = {
             overview: {
@@ -1975,7 +2245,8 @@ function Canvas() {
           showToast('剧本拆解完成');
         })
         .catch(err => {
-          updateNodeData(sourceNodeId, 'isGenerating', false);
+          clearInterval(interval);
+          setGlobalProgress({ visible: false, text: '', progress: 0 });
           showToast('拆解失败：' + err.message);
         });
 
@@ -2097,6 +2368,9 @@ function Canvas() {
       } else if (aiType === 'autoStoryboard') {
         title = 'Auto Storyboard (9-Grid)';
         description = 'Connect an Image Node to generate a 9-shot storyboard.';
+      } else if (aiType === 'singleFrameRepaint') {
+        title = '单帧重绘';
+        description = '连接多张图片节点(图A人物,图B场景,图C参考帧,图D道具)，再执行重绘';
       } else if (aiType === 'videoSynth') {
         title = '视频合成';
         description = 'Merge multiple video or audio nodes into one final composition.';
@@ -2319,6 +2593,26 @@ function Canvas() {
 
   return (
     <div className="w-full h-full relative bg-[#0E0F11]">
+      {globalProgress.visible && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[200] flex items-center justify-center pointer-events-none transition-all duration-300 animate-in slide-in-from-top-4 fade-in">
+          <div className={`bg-[#1C1C1E]/95 border border-zinc-800/80 backdrop-blur-md rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-4 border-b-2 ${globalProgress.progress === 100 ? 'border-b-emerald-400' : 'border-b-[#00bcd4]'}`}>
+            <div className="relative flex items-center justify-center w-6 h-6">
+               {globalProgress.progress === 100 ? (
+                 <CheckCircle className="text-emerald-400" size={18} />
+               ) : (
+                 <RefreshCw className="text-[#00bcd4] animate-spin" size={18} />
+               )}
+            </div>
+            <div className="flex flex-col min-w-[140px]">
+              <span className="text-zinc-200 text-sm font-medium">{globalProgress.text}</span>
+              <div className="h-1.5 w-full bg-zinc-800 rounded-full mt-1.5 overflow-hidden">
+                <div className={`h-full transition-all duration-500 rounded-full ${globalProgress.progress === 100 ? 'bg-emerald-400' : 'bg-[#00bcd4]'}`} style={{ width: `${globalProgress.progress}%` }}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Floating Top Toolbar */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[100] bg-[#111214]/80 backdrop-blur-xl border border-zinc-800/80 rounded-2xl shadow-lg flex items-center p-1.5 gap-1">
         <button className="px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors">
@@ -2790,6 +3084,10 @@ function Canvas() {
               <button onClick={() => { addNode('aiGenNode', 'autoStoryboard', screenToFlowPosition({ x: menu.left, y: menu.top }), menu.sourceNodeId); setMenu(null); }} className="flex items-center gap-3 w-full px-2 py-1.5 hover:bg-zinc-800 rounded-lg transition-colors text-[#00bcd4]">
                 <div className="w-6 h-6 rounded-md bg-[#00bcd4]/10 flex items-center justify-center"><LayoutGrid size={12} /></div>
                 <span className="text-sm">智能分镜生成</span>
+              </button>
+              <button onClick={() => { addNode('aiGenNode', 'singleFrameRepaint', screenToFlowPosition({ x: menu.left, y: menu.top }), menu.sourceNodeId); setMenu(null); }} className="flex items-center gap-3 w-full px-2 py-1.5 hover:bg-zinc-800 rounded-lg transition-colors text-[#00bcd4]">
+                <div className="w-6 h-6 rounded-md bg-[#00bcd4]/10 flex items-center justify-center"><Image size={12} /></div>
+                <span className="text-sm">单帧重绘</span>
               </button>
               {menu.type === 'add-connected-node' && (
                 <button onClick={() => { addNode('aiGenNode', 'videoSynth', screenToFlowPosition({ x: menu.left, y: menu.top }), menu.sourceNodeId); setMenu(null); }} className="flex items-center gap-3 w-full px-2 py-1.5 hover:bg-zinc-800 rounded-lg transition-colors text-[#00bcd4]">

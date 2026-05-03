@@ -15,3 +15,52 @@
   filter: drop-shadow(0 0 5px rgba(0,188,212,0.8));
   stroke-linecap: round;
 }
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  font-weight: 600;
+  color: #f4f4f5; /* zinc-100 */
+  margin-top: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.markdown-body h1 { font-size: 1.25rem; }
+.markdown-body h2 { font-size: 1.125rem; }
+.markdown-body h3 { font-size: 1rem; }
+
+.markdown-body p {
+  margin-bottom: 1em;
+  line-height: 1.7;
+}
+
+.markdown-body ul, .markdown-body ol {
+  margin-left: 1.25em;
+  margin-bottom: 1em;
+  line-height: 1.7;
+}
+
+.markdown-body ul {
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.markdown-body li {
+  margin-bottom: 0.5em;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+  color: #e4e4e7; /* zinc-200 */
+}
+
+.markdown-body hr {
+  border-color: rgba(255, 255, 255, 0.1);
+  margin: 1.5em 0;
+}
+
+.markdown-body a {
+  color: #f43f5e; /* rose-500 */
+  text-decoration: underline;
+}
