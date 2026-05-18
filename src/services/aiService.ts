@@ -586,43 +586,58 @@ export async function runStoryboarding(
 export async function runImageGeneration(
   prompt: string,
   referenceImageBase64?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  aspectRatio: string = '1:1',
+  resolution: string = '1K'
 ): Promise<string> {
-  const ai = getAIClient();
-  const parts: any[] = [];
+  // Use Pollinations API for free image generation testing
+  const seed = Math.floor(Math.random() * 100000);
   
-  if (referenceImageBase64) {
-    const match = referenceImageBase64.match(/^data:(.+);base64,(.*)$/);
-    if (match) {
-      parts.push({
-        inlineData: {
-          mimeType: match[1],
-          data: match[2]
-        }
-      });
-    }
-  }
-  
-  parts.push({ text: prompt });
+  let maxDim = 1024;
+  if (resolution === '2K') maxDim = 2048;
+  if (resolution === '4K') maxDim = 4096;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: { parts },
-    });
+  let width = maxDim;
+  let height = maxDim;
 
-    if (signal?.aborted) throw new Error("Task cancelled by user");
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/jpeg;base64,${part.inlineData.data}`;
+  if (aspectRatio !== '自适应' && aspectRatio !== '1:1') {
+    const [xStr, yStr] = aspectRatio.split(':');
+    const x = parseInt(xStr, 10);
+    const y = parseInt(yStr, 10);
+    if (!isNaN(x) && !isNaN(y)) {
+      if (x > y) {
+        width = maxDim;
+        height = Math.round((y / x) * maxDim);
+      } else {
+        height = maxDim;
+        width = Math.round((x / y) * maxDim);
       }
     }
+  }
+
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&seed=${seed}&width=${width}&height=${height}`;
+  
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error("Image generation failed");
     
-    throw new Error("No image data found in response.");
+    const blob = await response.blob();
+    
+    // Convert Blob to Base64 so downstream components like 'image2prompt' don't break when splitting 'data:image/...;base64,'
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve(reader.result as string);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   } catch (error: any) {
+    if (error.name === 'AbortError' || signal?.aborted) {
+      throw new Error("Task cancelled by user");
+    }
     console.error("Image Generation Error:", error);
-    throw new Error(getFriendlyErrorMessage(error));
+    throw new Error(error.message || "图像生成失败，请重试");
   }
 }
 

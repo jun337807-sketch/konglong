@@ -1,1226 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
-import {
-  ReactFlow,
-  MiniMap,
-  Controls,
-  Background,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  Node,
-  Edge,
-  Connection,
-  Panel,
-  Handle,
-  Position,
-  ReactFlowProvider,
-  BackgroundVariant,
-  useReactFlow,
-  SelectionMode,
-  NodeToolbar,
-  NodeResizer,
-  useEdges,
-  useNodes,
-  MarkerType,
-  BaseEdge,
-  getBezierPath,
-  EdgeLabelRenderer
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import Markdown from 'react-markdown';
-import { 
-  ImagePlus, Type, Film, BrainCircuit, LayoutGrid, X, 
-  Play, Maximize, Download, Sun, SplitSquareHorizontal, 
-  Move3D, Eye, Sparkles, Focus, RotateCw, BookMarked, 
-  Copy, CopyPlus, ClipboardPaste, Trash2, BoxSelect, Settings, HelpCircle,
-  Plus, Share2, Shapes, Clock, Headphones, AlignLeft, Image as ImageIcon, Video, Scissors, AudioLines, FileText, Upload, Box, MapPin, Monitor, Camera, Maximize2, Minimize2, Languages, Settings2, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowUp, User, RefreshCw, CheckCircle, Loader2, Briefcase, List
-} from 'lucide-react';
-import { useCanvasHistory } from '../hooks/useCanvasHistory';
-import { HistoryPanel } from './HistoryPanel';
-import { VersionPanel } from './VersionPanel';
-import { CapabilityPanel } from './CapabilityPanel';
-import { MediaCapability } from '../types/task';
-import { CleanPanoramaViewer, CleanPanoramaRef } from './CleanPanoramaViewer';
-import { getAIClient, runImageGeneration, runMegaBreakdown, runScriptReview } from '../services/aiService';
-import { taskQueueManager } from '../services/taskQueueManager';
-import { assetManager } from '../services/assetManager';
-
-import { ProjectSettingsPanel } from './ProjectSettingsPanel';
-import { ScriptStoryboardPanel } from './workspace/ScriptStoryboardPanel';
-import { SharedAssetLibrary } from './workspace/SharedAssetLibrary';
-import { CanvasMoreMenu } from './CanvasMoreMenu';
-import { AssetLibrary } from './AssetLibrary';
-import { TaskQueuePanel } from './TaskQueuePanel';
-import { PromptTemplatePanel } from './PromptTemplatePanel';
-import { projectSettingsService } from '../services/projectSettingsService';
-import { canvasActionService } from '../services/canvasActionService';
-import { canvasHealthCheck } from '../services/canvasHealthCheck';
-
-// Custom Node Styling Constants
-const selectedBorder = "border-[rgba(255,255,255,0.15)] shadow-[0_0_20px_rgba(255,255,255,0.15)]"; // White soft glow
-const defaultBorder = "border-zinc-800/80";
-const nodeBg = "bg-[#111214]/90 backdrop-blur-md";
-const handleStyle = "!w-5 !h-5 !min-w-[20px] !min-h-[20px] !absolute !top-1/2 !-translate-y-1/2 !bg-transparent !border-transparent hover:!bg-[#00bcd4] hover:!border-[#00bcd4] hover:!scale-125 hover:shadow-[0_0_12px_rgba(0,188,212,0.8)] transition-all duration-200 cursor-crosshair z-50 rounded-full";
-const resizerHandleStyle = "";
-
-// Custom Node Components
-const TextNode = ({ data, id, selected }: any) => {
-  const [showReviewMenu, setShowReviewMenu] = useState(false);
-  const [reviewMode, setReviewMode] = useState<'full' | 'scene' | 'beat'>('full');
-  const [reviewOptions, setReviewOptions] = useState({ compliance: true, dialogue: true });
-
-  const reviewModeConfig = {
-    'full': { label: '全文审查', icon: Zap, type: 'script-review-full' },
-    'scene': { label: '单场审查', icon: MapPin, type: 'script-review-scene' },
-    'beat': { label: 'Beat 审查', icon: Clock, type: 'script-review-beat' },
-  };
-
-  const currentReview = reviewModeConfig[reviewMode];
-  const CurrentIcon = currentReview.icon;
-
-  return (
-    <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={240} minHeight={150} isVisible={selected} />
-      <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[240px] w-full h-full flex flex-col group relative`} onClick={() => setShowReviewMenu(false)}>
-        {data.isGenerating && (
-          <div className="absolute inset-0 bg-[#1A1A1A]/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center gap-3 z-50">
-             <Zap className={`animate-pulse ${data.generatingText?.includes('审查') ? 'text-rose-500' : 'text-[#00bcd4]'}`} size={24} />
-             <div className={`text-sm font-medium animate-pulse ${data.generatingText?.includes('审查') ? 'text-rose-500' : 'text-[#00bcd4]'}`}>{data.generatingText || '处理中...'}</div>
-          </div>
-        )}
-        <Handle type="target" position={Position.Left} className={handleStyle} />
-        <div className="flex items-center gap-2 mb-3 text-zinc-400 pb-2 border-b border-zinc-800/50">
-          <Type size={14} className={selected ? "text-[#00bcd4]" : ""} />
-          <span className="text-xs font-semibold tracking-wide flex-1">文本 / 剧本</span>
-          <label className="cursor-pointer text-zinc-500 hover:text-[#00bcd4] transition-colors" title="上传TXT/MD剧本">
-            <Upload size={14} />
-            <input 
-              type="file" 
-              accept=".txt,.md,.csv" 
-              className="hidden" 
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    const text = ev.target?.result as string;
-                    if (data.onChange) data.onChange(id, text);
-                  };
-                  reader.readAsText(file);
-                }
-              }} 
-            />
-          </label>
-        </div>
-        <textarea 
-          className="w-full flex-1 bg-zinc-900/50 border border-zinc-800/50 rounded-lg p-3 text-sm text-zinc-300 resize-none focus:outline-none focus:border-[#00bcd4] mb-3 focus:bg-zinc-900/80 transition-colors"
-          value={data.text || ''}
-          onChange={(e) => data.onChange(id, e.target.value)}
-          placeholder="输入剧本内容..."
-        />
-        <div className="flex items-start justify-end gap-2 mt-auto pt-2 border-t border-zinc-800/50 flex-wrap relative">
-          {!data.isReviewResult && (
-            <>
-              <div className="relative flex">
-                <div className="flex items-stretch bg-zinc-800/80 hover:bg-rose-500/20 text-zinc-300 hover:text-rose-400 rounded-lg text-xs transition-colors border border-zinc-700/50 hover:border-rose-500/50">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); if (data.onAddNode) data.onAddNode('textNode', currentReview.type, undefined, id, { reviewOptions }); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 border-r border-zinc-700/50 hover:bg-rose-500/10 rounded-l-lg transition-colors"
-                  >
-                    <CurrentIcon size={12} />
-                    <span>{currentReview.label}</span>
-                  </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setShowReviewMenu(!showReviewMenu); }}
-                    className="flex items-center px-2 py-1.5 hover:bg-rose-500/10 rounded-r-lg transition-colors"
-                  >
-                    <ChevronDown size={12} className={`transition-transform duration-200 ${showReviewMenu ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
-                
-                {showReviewMenu && (
-                  <div className="absolute bottom-full mb-1 left-0 w-44 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-20 flex flex-col">
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setReviewMode('full'); 
-                        setShowReviewMenu(false); 
-                      }}
-                      className={`flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-700 transition-colors ${reviewMode === 'full' ? 'text-rose-400 bg-zinc-700/50' : 'text-zinc-300'}`}
-                    >
-                      <Zap size={12} />
-                      <div className="flex flex-col">
-                        <span>全文审查</span>
-                      </div>
-                    </button>
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setReviewMode('scene'); 
-                        setShowReviewMenu(false); 
-                      }}
-                      className={`flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-700 transition-colors border-t border-zinc-700/50 ${reviewMode === 'scene' ? 'text-rose-400 bg-zinc-700/50' : 'text-zinc-300'}`}
-                    >
-                      <MapPin size={12} />
-                      <div className="flex flex-col">
-                        <span>单场审查</span>
-                      </div>
-                    </button>
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setReviewMode('beat'); 
-                        setShowReviewMenu(false); 
-                      }}
-                      className={`flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-700 transition-colors border-t border-zinc-700/50 ${reviewMode === 'beat' ? 'text-rose-400 bg-zinc-700/50' : 'text-zinc-300'}`}
-                    >
-                      <Clock size={12} />
-                      <div className="flex flex-col">
-                        <span>Beat 审查</span>
-                      </div>
-                    </button>
-                    
-                    <div className="border-t border-zinc-700/50 mt-1 pt-1 pb-1">
-                      <div className="px-3 py-1 text-[10px] text-zinc-500 font-medium">审查选项</div>
-                      <label 
-                        className="flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input 
-                          type="checkbox" 
-                          checked={reviewOptions.compliance} 
-                          onChange={(e) => setReviewOptions(prev => ({...prev, compliance: e.target.checked}))} 
-                          className="w-3 h-3 rounded bg-zinc-900 border-zinc-600 text-rose-500 focus:ring-rose-500/50" 
-                        />
-                        <span>内容合规风险</span>
-                      </label>
-                      <label 
-                        className="flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors cursor-pointer"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input 
-                          type="checkbox" 
-                          checked={reviewOptions.dialogue} 
-                          onChange={(e) => setReviewOptions(prev => ({...prev, dialogue: e.target.checked}))} 
-                          className="w-3 h-3 rounded bg-zinc-900 border-zinc-600 text-rose-500 focus:ring-rose-500/50" 
-                        />
-                        <span>台词 / OS 问题</span>
-                      </label>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); if (data.onAddNode) data.onAddNode('scriptNode', 'director-breakdown', undefined, id); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/80 hover:bg-[#00bcd4]/20 text-zinc-300 hover:text-[#00bcd4] rounded-lg text-xs transition-colors border border-zinc-700/50 hover:border-[#00bcd4]/50"
-              >
-                <Film size={12} />
-                <span>剧本拆解</span>
-              </button>
-            </>
-          )}
-
-          {data.isReviewResult && (
-            <>
-              {data.repairedText && (
-                <button 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    if (data.onApplyRepair) data.onApplyRepair(data.sourceId, data.repairedText); 
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-xs transition-colors border border-emerald-500/30 hover:border-emerald-500/50"
-                >
-                  <CheckCircle size={12} />
-                  <span>应用修复</span>
-                </button>
-              )}
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  if (data.onAddNode) {
-                    data.onAddNode('textNode', `script-review-${data.reviewType}`, undefined, data.sourceId, { problem: data.problem }); 
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg text-xs transition-colors border border-blue-500/30 hover:border-blue-500/50"
-              >
-                <RefreshCw size={12} />
-                <span>重新审查</span>
-              </button>
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  const problem = prompt("请输入您发现的具体问题：");
-                  if (problem && data.onAddNode) data.onAddNode('textNode', 'script-review-repair', undefined, data.sourceId, { problem }); 
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/80 hover:bg-orange-500/20 text-zinc-300 hover:text-orange-400 rounded-lg text-xs transition-colors border border-zinc-700/50 hover:border-orange-500/50"
-              >
-                <Focus size={12} />
-                <span>定点返修</span>
-              </button>
-            </>
-          )}
-        </div>
-        <Handle type="source" position={Position.Right} className={handleStyle} />
-      </div>
-    </>
-  );
-};
-
-const ImageNode = ({ data, id, selected }: any) => {
-  const edges = useEdges();
-  const nodes = useNodes();
-  const { setNodes, getNode, updateNodeData } = useReactFlow();
-  const [prompt, setPrompt] = useState(data.prompt || '');
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isPanoramaOpen, setIsPanoramaOpen] = useState(false);
-  const panoramaRef = useRef<CleanPanoramaRef>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const handlePanoramaScreenshot = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (panoramaRef.current) {
-      const screenshot = panoramaRef.current.takeScreenshot();
-      if (screenshot && data.onAddNode) {
-        data.onAddNode('imageNode', 'panorama-screenshot', undefined, undefined, { 
-          imageUrl: screenshot.dataUrl,
-          initialWidth: 320,
-          initialHeight: Math.round(320 * (screenshot.height / screenshot.width))
-        });
-        setIsPanoramaOpen(false);
-      }
-    }
-  };
-  const [showAddMenu, setShowAddMenu] = useState(false);
-  const [showFormatMenu, setShowFormatMenu] = useState(false);
-  const [resolution, setResolution] = useState('2K');
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [imageCount, setImageCount] = useState(1);
-  const [showCountMenu, setShowCountMenu] = useState(false);
-  
-  const [stylePreset, setStylePreset] = useState('写实');
-  const [showStyleMenu, setShowStyleMenu] = useState(false);
-
-  const styleOptions = ['写实', '二次元', '赛博朋克', '水墨', '油画', '3D 渲染', '漫画', '铅笔画'];
-  
-  const [showMultiAngle, setShowMultiAngle] = useState(false);
-  const [maHorizontal, setMaHorizontal] = useState(0);
-  const [maVertical, setMaVertical] = useState(0);
-  const [maZoom, setMaZoom] = useState(2);
-  const [maUsePrompt, setMaUsePrompt] = useState(false);
-  const [maPreset, setMaPreset] = useState('自定义');
-
-  React.useEffect(() => {
-    const handleClickOutside = () => {
-      setShowFormatMenu(false);
-      setShowCountMenu(false);
-      setShowStyleMenu(false);
-      setShowAddMenu(false);
-    };
-    window.addEventListener('click', handleClickOutside);
-    return () => window.removeEventListener('click', handleClickOutside);
-  }, []);
-
-  const applyMaPreset = (p: string) => {
-    if (p === '自定义') return;
-    if (p === '倾斜视角') { setMaHorizontal(45); setMaVertical(45); }
-    else if (p === '正面俯拍') { setMaHorizontal(0); setMaVertical(45); }
-    else if (p === '正面仰拍') { setMaHorizontal(0); setMaVertical(-45); }
-    else if (p === '全景俯拍') { setMaHorizontal(180); setMaVertical(90); }
-    else if (p === '背面视角') { setMaHorizontal(180); setMaVertical(0); }
-    else if (p === '鱼眼视角') { setMaZoom(4); setMaHorizontal(0); setMaVertical(0); }
-  };
-
-  const incomingEdges = edges.filter((e: any) => e.target === id);
-  const referenceNodes = incomingEdges.map((e: any) => nodes.find((n: any) => n.id === e.source)).filter(Boolean);
-  const referenceImages = referenceNodes.filter((n: any) => n?.type === 'imageNode' && n?.data?.imageUrl);
-
-  const handleAction = (action: string, payload?: any) => {
-    setActiveDropdown(null);
-    if (action === 'preview') {
-      setIsPreviewOpen(true);
-      return;
-    }
-    if (action === 'panorama') {
-      if (data.imageUrl) {
-        setIsPanoramaOpen(true);
-      } else {
-        alert("请先生成图片");
-      }
-      return;
-    }
-    if (action === 'hd-redraw') {
-      if (data.onAddNode) {
-        data.onAddNode('aiGenNode', 'singleFrameRepaint', undefined, id);
-      }
-      return;
-    }
-    if (data.onAction) {
-      data.onAction(id, action, payload);
-    }
-  };
-
-  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const { naturalWidth, naturalHeight } = e.currentTarget;
-    if (naturalWidth && naturalHeight && data.aspectRatioLockedFor !== data.imageUrl) {
-      const node = getNode(id);
-      if (node) {
-        const aspect = naturalWidth / naturalHeight;
-        const currentWidth = node.style?.width ? parseInt(node.style.width as string) : 320;
-        const targetHeight = Math.round(currentWidth / aspect);
-        
-        if (Math.abs((node.style?.height as number || 0) - targetHeight) > 2) {
-          setNodes(nds => nds.map(n => {
-            if (n.id === id) {
-              return {
-                ...n,
-                style: { ...n.style, width: currentWidth, height: targetHeight },
-                data: { ...n.data, aspectRatioLockedFor: data.imageUrl }
-              };
-            }
-            return n;
-          }));
-        } else {
-          setNodes(nds => nds.map(n => {
-            if (n.id === id) {
-              return { ...n, data: { ...n.data, aspectRatioLockedFor: data.imageUrl } };
-            }
-            return n;
-          }));
-        }
-      }
-    }
-  };
-
-  return (
-    <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={240} minHeight={100} isVisible={selected} keepAspectRatio={!!data.imageUrl} />
-      
-      {/* Node Label (Above Node) */}
-      <div className={`absolute -top-7 left-0 text-zinc-400 text-xs flex items-center gap-1.5 font-medium px-1 transition-opacity ${selected ? 'opacity-0' : 'opacity-100'}`}>
-        <ImageIcon size={14} />
-        {data.title || '图片节点'}
-      </div>
-      
-      <NodeToolbar
-        isVisible={selected}
-        position={Position.Top}
-        className="flex items-center gap-1 p-1 bg-[#1a1b1e]/95 backdrop-blur-xl border border-zinc-700/80 rounded-xl shadow-2xl z-50 mb-2 relative"
-      >
-        <button onClick={() => handleAction('panorama')} className="p-1.5 text-zinc-400 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10 rounded-lg tooltip relative" title="全景"><Maximize size={15} /></button>
-        <button onClick={() => setShowMultiAngle(!showMultiAngle)} className={`p-1.5 rounded-lg tooltip ${showMultiAngle ? 'text-white bg-zinc-800' : 'text-zinc-400 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10'}`} title="多角度"><Move3D size={15} /></button>
-        <button onClick={() => handleAction('relight')} className="p-1.5 text-zinc-400 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10 rounded-lg tooltip" title="打光"><Sun size={15} /></button>
-        <div className="w-px h-4 bg-zinc-700 mx-0.5"></div>
-        <div className="relative">
-          <button onClick={() => setActiveDropdown(activeDropdown === '9grid' ? null : '9grid')} className={`p-1.5 rounded-lg tooltip ${activeDropdown === '9grid' ? 'text-white bg-zinc-800' : 'text-zinc-400 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10'}`} title="九宫格"><LayoutGrid size={15} /></button>
-          {activeDropdown === '9grid' && (
-             <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-[#242424] border border-zinc-800 rounded-lg shadow-xl w-32 py-1 z-[100] text-sm text-zinc-300">
-               <button onClick={() => handleAction('9grid-multi')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">多视图网格</button>
-               <button onClick={() => handleAction('9grid-story')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">分镜推演</button>
-               <button onClick={() => handleAction('9grid-character')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">角色三视图</button>
-             </div>
-          )}
-        </div>
-        <div className="relative">
-          <button onClick={() => setActiveDropdown(activeDropdown === 'hd' ? null : 'hd')} className={`p-1.5 rounded-lg tooltip ${activeDropdown === 'hd' ? 'text-white bg-zinc-800' : 'text-zinc-400 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10'}`} title="高清"><Sparkles size={15} /></button>
-          {activeDropdown === 'hd' && (
-             <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-[#242424] border border-zinc-800 rounded-lg shadow-xl w-32 py-1 z-[100] text-sm text-zinc-300">
-               <button onClick={() => handleAction('hd-enhance')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">高清增强</button>
-               <button onClick={() => handleAction('hd-expand')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">扩图</button>
-               <button onClick={() => handleAction('hd-redraw')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">单帧重绘</button>
-               <button onClick={() => handleAction('hd-erase')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">擦除</button>
-             </div>
-          )}
-        </div>
-        <div className="relative">
-          <button onClick={() => setActiveDropdown(activeDropdown === 'split' ? null : 'split')} className={`p-1.5 rounded-lg tooltip ${activeDropdown === 'split' ? 'text-white bg-zinc-800' : 'text-zinc-400 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10'}`} title="宫格切分"><SplitSquareHorizontal size={15} /></button>
-          {activeDropdown === 'split' && (
-             <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-[#242424] border border-zinc-800 rounded-lg shadow-xl w-24 py-1 z-[100] text-sm text-zinc-300">
-               <button onClick={() => handleAction('split-4')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">4宫格</button>
-               <button onClick={() => handleAction('split-9')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">9宫格</button>
-               <button onClick={() => handleAction('split-16')} className="w-full text-left px-3 py-1.5 hover:bg-[#343434] hover:text-white">16宫格</button>
-             </div>
-          )}
-        </div>
-        <div className="w-px h-4 bg-zinc-700 mx-0.5"></div>
-        <button onClick={() => handleAction('annotate')} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg tooltip" title="标注"><Focus size={15} /></button>
-        <button onClick={() => handleAction('rotate')} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg tooltip" title="旋转"><RotateCw size={15} /></button>
-        <button onClick={() => handleAction('download')} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg tooltip" title="下载"><Download size={15} /></button>
-        <button onClick={() => handleAction('preview')} className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg tooltip" title="预览"><Eye size={15} /></button>
-      </NodeToolbar>
-      
-      <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-0 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow w-full h-full flex flex-col relative group`}>
-        
-        <Handle type="target" position={Position.Left} className={handleStyle} />
-        
-        {/* Thumbnails outside top-left */}
-        {data.thumbnails && data.thumbnails.length > 0 && (
-          <div 
-            className="absolute -left-14 top-0 flex flex-col gap-2 overflow-y-auto px-1 py-1 shrink-0 custom-scrollbar h-full z-50 pointer-events-auto"
-            style={{ maxHeight: '100%' }}
-            onWheel={(e) => e.stopPropagation()}
-          >
-            {data.thumbnails.map((thumb: string, idx: number) => (
-              <div 
-                key={idx} 
-                onClick={(e) => { e.stopPropagation(); if(data.onAction) data.onAction(id, 'select-thumbnail', thumb) }} 
-                className={`w-10 h-10 shrink-0 rounded-lg overflow-hidden border ${data.imageUrl === thumb ? 'border-[#00bcd4] shadow-[0_0_8px_rgba(0,188,212,0.4)]' : 'border-zinc-800/50 md:hover:border-zinc-500'} cursor-pointer transition-all relative nodrag`}
-              >
-                 <img src={thumb || undefined} className="w-full h-full object-cover" />
-              </div>
-            ))}
-          </div>
-        )}
-        
-        {/* Right '+' Button / Handle */}
-        <div className="absolute top-1/2 -translate-y-1/2 -right-8 z-40 opacity-0 group-hover:opacity-100 transition-opacity">
-           <button 
-             onClick={(e) => { e.stopPropagation(); setShowAddMenu(!showAddMenu); }}
-             className="w-6 h-6 rounded-full bg-[#2A2A2A] border border-zinc-600 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-700 hover:scale-110 transition-all shadow-md"
-           >
-             <Plus size={14} />
-           </button>
-
-           {showAddMenu && (
-             <div className="absolute top-0 left-full ml-2 bg-[#2A2A2A] border border-zinc-700/80 rounded-xl shadow-2xl p-2 w-48 flex flex-col gap-1 z-[100]" onClick={e => e.stopPropagation()}>
-               <div className="text-xs text-zinc-500 font-medium px-2 py-1.5 mb-1">引用该节点生成</div>
-               <button onClick={(e) => { e.stopPropagation(); if(data.onAddNode) data.onAddNode('textNode', undefined, undefined, id); setShowAddMenu(false); }} className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-700/50 rounded-lg transition-colors text-zinc-300">
-                 <div className="w-6 h-6 rounded bg-zinc-800 flex items-center justify-center"><Type size={12} /></div>
-                 <span className="text-sm">文本</span>
-               </button>
-               <button onClick={(e) => { e.stopPropagation(); if(data.onAddNode) data.onAddNode('imageNode', undefined, undefined, id); setShowAddMenu(false); }} className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-700/50 rounded-lg transition-colors text-zinc-300">
-                 <div className="w-6 h-6 rounded bg-zinc-800 flex items-center justify-center"><ImageIcon size={12} /></div>
-                 <span className="text-sm">图片</span>
-               </button>
-               <button onClick={(e) => { e.stopPropagation(); if(data.onAddNode) data.onAddNode('videoNode', undefined, undefined, id); setShowAddMenu(false); }} className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-700/50 rounded-lg transition-colors text-zinc-300">
-                 <div className="w-6 h-6 rounded bg-zinc-800 flex items-center justify-center"><Video size={12} /></div>
-                 <span className="text-sm">视频</span>
-               </button>
-             </div>
-           )}
-        </div>
-        <Handle type="source" position={Position.Right} className={handleStyle} />
-
-        {data.imageUrl ? (
-          <div className="flex-1 rounded-2xl overflow-hidden relative group/img bg-transparent m-1 flex flex-col justify-center">
-            <img 
-              src={data.imageUrl || undefined} 
-              onLoad={handleImageLoad}
-              alt="Node content" 
-              className={`w-full h-full object-contain block ${data.rotation ? 'rotate-90 transition-transform' : ''}`} 
-            />
-            <button onClick={(e) => { e.stopPropagation(); if(data.onAction) data.onAction(id, 'download'); }} className="absolute top-3 right-3 p-2 bg-black/60 hover:bg-black/80 text-white rounded-lg opacity-0 group-hover/img:opacity-100 transition-opacity z-10">
-               <Upload size={16} />
-            </button>
-            
-            {data.isGenerating && (
-              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-                <Sparkles className="text-[#00bcd4] animate-pulse mb-2" size={32} />
-                <span className="text-sm text-zinc-300 font-medium">处理中...</span>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex-1 rounded-2xl bg-[#2A2A2A]/50 border-2 border-transparent hover:border-zinc-700 transition-colors flex flex-col items-center justify-center relative m-1">
-             <div className="text-zinc-600 mb-6 mt-4">
-               <ImageIcon size={64} className="opacity-40 mx-auto" />
-             </div>
-             
-             <div className={`absolute left-1/2 -translate-x-1/2 transition-all duration-200 z-[100] opacity-0 group-hover:opacity-100 ${selected ? '-top-[90px]' : '-top-12'}`}>
-                <label className="flex items-center gap-2 px-3 py-1.5 bg-[#2A2A2A] border border-zinc-700 hover:bg-zinc-700 text-zinc-300 rounded-lg cursor-pointer text-sm shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-                  <Upload size={14} /> 上传
-                  <input type="file" accept="image/*" className="hidden" onClick={e => e.stopPropagation()} onChange={(e) => {
-                     e.stopPropagation();
-                     const file = e.target.files?.[0];
-                     if(file) {
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                           if(data.onUpload) data.onUpload(id, ev.target?.result as string, 'image');
-                        }
-                        reader.readAsDataURL(file);
-                     }
-                  }}/>
-                </label>
-             </div>
-             
-             
-          </div>
-        )}
-      </div>
-
-      {showMultiAngle && (
-        <div 
-          className="absolute top-[calc(100%+16px)] left-0 bg-[#2A2A2A] border border-zinc-700/80 rounded-2xl shadow-2xl p-5 flex flex-col w-[540px] z-[70] cursor-default nodrag"
-          onWheel={(e) => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between border-b border-zinc-700/50 pb-3 mb-4">
-            <div className="text-sm font-medium text-zinc-200">多角度编辑器</div>
-            <button onClick={() => setShowMultiAngle(false)} className="text-zinc-500 hover:text-white"><X size={16} /></button>
-          </div>
-          
-          <div className="flex gap-2 text-[11px] mb-6 overflow-x-auto no-scrollbar pb-1">
-            {['自定义', '鱼眼视角', '倾斜视角', '正面俯拍', '正面仰拍', '全景俯拍', '背面视角'].map(p => (
-              <button 
-                key={p}
-                onClick={(e) => { e.stopPropagation(); setMaPreset(p); applyMaPreset(p); }}
-                className={`px-3 py-1.5 rounded-lg bg-[#202020] border transition-colors ${maPreset === p ? 'border-zinc-400 text-white' : 'border-zinc-700/50 text-zinc-400 hover:text-white hover:border-zinc-500'} whitespace-nowrap`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex gap-6 items-center">
-            {/* Sphere */}
-            <div className="w-[200px] h-[200px] bg-[#1E1E1E] rounded-2xl flex items-center justify-center relative shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
-                <svg width="160" height="160" viewBox="0 0 100 100" className="absolute opacity-20 text-zinc-400">
-                  <circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                  <ellipse cx="50" cy="50" rx="16" ry="48" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                  <ellipse cx="50" cy="50" rx="32" ry="48" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                  <ellipse cx="50" cy="50" rx="48" ry="16" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                  <ellipse cx="50" cy="50" rx="48" ry="32" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                </svg>
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 text-zinc-500"><ChevronUp size={14} /></div>
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-zinc-500"><ChevronDown size={14} /></div>
-                <div className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500"><ChevronLeft size={14} /></div>
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500"><ChevronRight size={14} /></div>
-                <div className="w-[72px] h-[72px] bg-black rounded-lg overflow-hidden relative shadow-2xl ring-1 ring-white/10 z-10 flex items-center justify-center pointer-events-none">
-                   {data.imageUrl ? <img src={data.imageUrl || undefined} className="w-full h-full object-cover opacity-90" /> : <ImageIcon size={24} className="text-zinc-700" />}
-                   <div className="absolute inset-0 border border-white/20 rounded-lg pointer-events-none"></div>
-                   <div className="absolute top-1/2 left-0 w-full h-[1px] bg-white/20 border-t border-dashed border-white/30 pointer-events-none"></div>
-                   <div className="absolute top-0 left-1/2 w-[1px] h-full bg-white/20 border-l border-dashed border-white/30 pointer-events-none"></div>
-                </div>
-            </div>
-            
-            {/* Sliders */}
-            <div className="flex-1 flex flex-col gap-5">
-               <div className="flex items-center gap-4">
-                 <span className="text-xs text-zinc-400 w-14 shrink-0">水平环绕</span>
-                 <input type="range" min={-180} max={180} value={maHorizontal} onChange={(e) => { setMaHorizontal(Number(e.target.value)); setMaPreset('自定义'); }} className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none accent-white cursor-pointer" />
-                 <span className="text-xs text-zinc-200 w-8 text-right shrink-0">{maHorizontal}°</span>
-               </div>
-               <div className="flex items-center gap-4">
-                 <span className="text-xs text-zinc-400 w-14 shrink-0">垂直俯仰</span>
-                 <input type="range" min={-90} max={90} value={maVertical} onChange={(e) => { setMaVertical(Number(e.target.value)); setMaPreset('自定义'); }} className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none accent-white cursor-pointer" />
-                 <span className="text-xs text-zinc-200 w-8 text-right shrink-0">{maVertical}°</span>
-               </div>
-               <div className="flex items-center gap-4">
-                 <span className="text-xs text-zinc-400 w-14 shrink-0">景别缩放</span>
-                 <input type="range" min={0} max={4} value={maZoom} onChange={(e) => { setMaZoom(Number(e.target.value)); setMaPreset('自定义'); }} className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none accent-white cursor-pointer" />
-                 <span className="text-xs text-zinc-200 w-8 text-right shrink-0">{['特写', '近景', '中景', '全景', '远景'][maZoom]}</span>
-               </div>
-               
-               <div className="flex items-center gap-3 mt-1">
-                 <span className="text-xs text-zinc-400 w-14 shrink-0">提示词</span>
-                 <button 
-                   onClick={() => setMaUsePrompt(!maUsePrompt)}
-                   className={`w-9 h-5 rounded-full transition-colors relative ${maUsePrompt ? 'bg-[#00bcd4]' : 'bg-zinc-700'}`}
-                 >
-                   <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all ${maUsePrompt ? 'left-5' : 'left-0.5'}`} />
-                 </button>
-               </div>
-            </div>
-          </div>
-          
-          <div className="mt-6 flex items-center justify-between border-t border-zinc-700/50 pt-4">
-            <button 
-              className="text-[11px] text-zinc-400 hover:text-white flex items-center gap-1.5 transition-colors"
-              onClick={(e) => { e.stopPropagation(); setMaHorizontal(0); setMaVertical(0); setMaZoom(2); setMaPreset('自定义'); }}
-            >
-              <RefreshCw size={12} /> 重置参数
-            </button>
-            
-            <div className="flex items-center gap-3">
-               <span className="text-[11px] text-zinc-500 flex items-center gap-1"><Zap size={10} className="text-zinc-600" /> 1</span>
-               <button 
-                 className={`w-8 h-8 rounded-full ${data.isGenerating ? 'bg-[#00bcd4]/20' : 'bg-white hover:bg-zinc-200'} text-black flex items-center justify-center transition-colors shadow-lg`}
-                 onClick={(e) => { 
-                   e.stopPropagation(); 
-                   if (data.onAction) data.onAction(id, 'multi-angle-gen', { horizontal: maHorizontal, vertical: maVertical, zoom: maZoom, usePrompt: maUsePrompt }); 
-                   setShowMultiAngle(false); 
-                 }}
-               >
-                 <ArrowUp size={16} />
-               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Generation Panel (only show on selected) */}
-      {(selected && !isPreviewOpen) && (
-        <div 
-          className="absolute top-[calc(100%+16px)] left-0 bg-[#2A2A2A] border border-zinc-700 rounded-2xl shadow-2xl p-4 flex flex-col gap-3 min-w-[560px] min-h-[250px] w-[560px] z-[60] cursor-default overflow-visible"
-          onWheel={(e) => e.stopPropagation()}
-          onClick={e => {
-            e.stopPropagation();
-            setShowFormatMenu(false);
-            setShowStyleMenu(false);
-            setShowCountMenu(false);
-          }}
-        >
-           {/* Top tools & Reference Images */}
-           <div className="flex items-center gap-2">
-             {referenceImages.length > 0 && (
-               <div className="ml-auto pl-4 border-zinc-700 flex items-center gap-2">
-                 {referenceImages.map((refNode: any, i: number) => (
-                   <div key={refNode.id} className="relative w-8 h-8 rounded-md overflow-hidden border border-zinc-600 shadow-sm">
-                     <img src={refNode.data.imageUrl || undefined} className="w-full h-full object-cover" />
-                     <div className="absolute -top-1 -right-1 bg-[#242424] text-white border border-zinc-600 text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                       {i + 1}
-                     </div>
-                   </div>
-                 ))}
-               </div>
-             )}
-           </div>
-
-           {/* Input Area */}
-           <div className={`relative flex-1 flex flex-col group/textarea min-h-0 bg-zinc-800/50 border border-zinc-700/50 rounded-xl mb-4 ${isExpanded ? 'z-50 shadow-2xl border-[#00bcd4]/50 h-auto' : 'focus-within:border-zinc-500 focus-within:bg-zinc-800 transition-colors'}`}>
-             {isExpanded && (
-                <div className="fixed inset-0 z-40 bg-black/20" onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}></div>
-             )}
-             <div className={`relative flex flex-col p-3 z-50 ${isExpanded ? 'bg-[#2A2A2A] rounded-xl' : ''}`}>
-               <button 
-                 onClick={(e) => { 
-                   e.stopPropagation(); 
-                   setIsExpanded(!isExpanded); 
-                   if (!isExpanded && textareaRef.current) {
-                     setTimeout(() => {
-                        textareaRef.current!.style.height = 'auto';
-                        textareaRef.current!.style.height = textareaRef.current!.scrollHeight + 'px';
-                        textareaRef.current!.focus();
-                     }, 10);
-                   } else if (textareaRef.current) {
-                     textareaRef.current.style.height = 'auto';
-                   }
-                 }}
-                 className="absolute top-2 right-2 p-1.5 text-zinc-400 hover:text-white bg-zinc-800 rounded opacity-0 group-hover/textarea:opacity-100 transition-opacity z-10 hover:bg-zinc-700"
-                 title={isExpanded ? "收起" : "展开全文"}
-                 onMouseDown={e => e.stopPropagation()}
-               >
-                 {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-               </button>
-               <textarea 
-                 ref={textareaRef}
-                 className={`w-full text-sm py-2 px-3 bg-transparent border-none focus:outline-none resize-y text-zinc-300 placeholder-zinc-500 nodrag nopan nowheel font-medium selection:bg-purple-500/30 custom-scrollbar pb-6 ${isExpanded ? 'min-h-[200px]' : 'min-h-[60px]'}`}
-                 placeholder="描述你想要生成的画面内容，@引用素材"
-                 value={prompt}
-                 onMouseDown={e => e.stopPropagation()}
-                 onKeyDown={e => e.stopPropagation()}
-                 onChange={e => {
-                    setPrompt(e.target.value);
-                    updateNodeData(id, { ...data, prompt: e.target.value });
-                    if (isExpanded && textareaRef.current) {
-                      textareaRef.current.style.height = 'auto';
-                      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-                    }
-                 }}
-               />
-             </div>
-           </div>
-
-           {/* Bottom Bar */}
-           <div className="flex items-center justify-between border-t border-zinc-700/50 pt-3 flex-nowrap">
-             <div className="flex items-center gap-2 shrink-0">
-               <button className="flex items-center gap-1 text-xs text-zinc-300 hover:text-white transition-colors">
-                 <X size={14} className="text-zinc-400" /> Pollinations API <ChevronDown size={12} />
-               </button>
-               <div className="relative">
-                 <button 
-                   onClick={(e) => { e.stopPropagation(); setShowFormatMenu(!showFormatMenu); }}
-                   className={`flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-md whitespace-nowrap shrink-0 ${showFormatMenu ? 'bg-zinc-800 text-white' : 'text-zinc-300 hover:text-white hover:bg-zinc-800/50'}`}
-                 >
-                   <Monitor size={14} className={showFormatMenu ? 'text-[#00bcd4]' : 'text-zinc-400'} /> {aspectRatio} • {resolution} <ChevronDown size={12} className={`transition-transform ${showFormatMenu ? 'rotate-180' : ''}`} />
-                 </button>
-                 
-                 {showFormatMenu && (
-                   <div 
-                     className="absolute top-[calc(100%+8px)] left-0 w-[340px] bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-50 flex flex-col gap-4"
-                     onClick={(e) => e.stopPropagation()}
-                   >
-                     {/* 分辨率 */}
-                     <div>
-                       <div className="text-xs text-zinc-500 mb-2 font-medium">分辨率</div>
-                       <div className="grid grid-cols-3 gap-2">
-                         {['1K', '2K', '4K'].map(res => {
-                           const isUnsupported = res === '4K';
-                           return (
-                             <button 
-                               key={res}
-                               onClick={(e) => { e.stopPropagation(); if (!isUnsupported) setResolution(res); }}
-                               disabled={isUnsupported}
-                               className={`py-1.5 text-xs rounded-lg border transition-colors ${
-                                 isUnsupported ? 'border-zinc-800 text-zinc-600 bg-zinc-900/50 cursor-not-allowed' :
-                                 resolution === res ? 'border-zinc-500 bg-white/5 shadow-[0_0_12px_rgba(255,255,255,0.15)] text-white font-medium' : 'border-zinc-700/50 text-zinc-400 hover:border-zinc-500 hover:text-zinc-300'
-                               }`}
-                             >
-                               {res}
-                             </button>
-                           );
-                         })}
-                       </div>
-                     </div>
-                     
-                     {/* 比例 */}
-                     <div>
-                       <div className="text-xs text-zinc-500 mb-2 font-medium">比例</div>
-                       <div className="grid grid-cols-5 gap-2">
-                         {[
-                           { label: '自适应', aspect: 'auto' },
-                           { label: '1:1', aspect: '1/1' },
-                           { label: '9:16', aspect: '9/16' },
-                           { label: '16:9', aspect: '16/9' },
-                           { label: '3:4', aspect: '3/4' },
-                           { label: '4:3', aspect: '4/3' },
-                           { label: '3:2', aspect: '3/2' },
-                           { label: '2:3', aspect: '2/3' },
-                           { label: '4:5', aspect: '4/5' },
-                           { label: '5:4', aspect: '5/4' },
-                           { label: '21:9', aspect: '21/9' },
-                         ].map(ratio => {
-                           const isSelected = aspectRatio === ratio.label;
-                           // Parse aspect ratio numbers for icon sizing
-                           let w = 12, h = 12;
-                           if (ratio.aspect !== 'auto') {
-                             const [x, y] = ratio.aspect.split('/').map(Number);
-                             const maxDim = 16;
-                             if (x > y) {
-                               w = maxDim;
-                               h = (y / x) * maxDim;
-                             } else {
-                               h = maxDim;
-                               w = (x / y) * maxDim;
-                             }
-                           }
-                           
-                           return (
-                             <button
-                               key={ratio.label}
-                               onClick={(e) => { e.stopPropagation(); setAspectRatio(ratio.label); }}
-                               className={`flex flex-col items-center justify-center p-2 rounded-lg border transition-all ${isSelected ? 'border-zinc-500 bg-white/5 shadow-[0_0_12px_rgba(255,255,255,0.15)] text-white' : 'border-zinc-800/50 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300'}`}
-                             >
-                               <div className="h-6 flex items-center justify-center mb-1">
-                                 {ratio.aspect === 'auto' ? (
-                                    <div className={`border-2 rounded-[2px] transition-colors w-4 h-4 ${isSelected ? 'border-white' : 'border-zinc-500'}`} />
-                                 ) : (
-                                    <div className={`border-2 rounded-[2px] transition-colors ${isSelected ? 'border-white' : 'border-zinc-500'}`} style={{ width: Math.max(8, w), height: Math.max(8, h) }} />
-                                 )}
-                               </div>
-                               <div className={`text-[10px] ${isSelected ? 'text-white font-medium' : 'text-zinc-500'}`}>
-                                 {ratio.label}
-                               </div>
-                             </button>
-                           );
-                         })}
-                       </div>
-                     </div>
-                   </div>
-                 )}
-               </div>
-               
-             </div>
-
-             <div className="flex items-center gap-2 shrink-0">
-               <button 
-                 className="text-zinc-400 hover:text-white" 
-                 title="中英翻译"
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   if (data.onAction) {
-                      data.onAction(id, 'translate-prompt', data.prompt);
-                   }
-                 }}
-               >
-                 <Languages size={14} />
-               </button>
-               <button className="text-zinc-400 hover:text-white"><Settings2 size={14} /></button>
-               
-               <div className="relative">
-                 <button onClick={(e) => { e.stopPropagation(); setShowCountMenu(!showCountMenu); }} className="text-zinc-300 text-xs flex items-center gap-1 hover:text-white transition-colors">
-                   {imageCount}张 <ChevronDown size={12} className={`transition-transform ${showCountMenu ? 'rotate-180' : ''}`} />
-                 </button>
-                 {showCountMenu && (
-                   <div className="absolute bottom-full right-0 mb-2 w-20 bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-2xl py-2 flex flex-col z-50">
-                     {[1, 2, 4].map(num => (
-                       <button
-                         key={num}
-                         onClick={(e) => { e.stopPropagation(); setImageCount(num); setShowCountMenu(false); }}
-                         className={`px-4 py-1.5 text-xs text-left transition-colors ${imageCount === num ? 'bg-zinc-800 text-[#00bcd4]' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-white'}`}
-                       >
-                         {num}张
-                       </button>
-                     ))}
-                   </div>
-                 )}
-               </div>
-               
-               <button 
-                 className={`w-8 h-8 rounded-full ${data.isGenerating ? 'bg-[#00bcd4]/20' : 'bg-zinc-600 hover:bg-[#00bcd4]'} text-white flex items-center justify-center transition-all shadow-lg ml-1 relative`}
-                 onClick={(e) => { e.stopPropagation(); if(!data.isGenerating && data.onGenerate) data.onGenerate(id, { aspectRatio, resolution, imageCount, stylePreset }); }}
-                 disabled={data.isGenerating}
-               >
-                 {data.isGenerating ? (
-                   <>
-                     <div className="absolute inset-0 rounded-full border-[1.5px] border-[#00bcd4] border-t-transparent animate-spin" />
-                     <div className="text-[10px] text-[#00bcd4] font-medium">{data.progress ? `${Math.round(data.progress)}%` : ''}</div>
-                   </>
-                 ) : (
-                   <ArrowUp size={16} />
-                 )}
-               </button>
-             </div>
-           </div>
-        </div>
-      )}
-
-      {isPreviewOpen && data.imageUrl && createPortal(
-        <div className="fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center backdrop-blur-sm" onClick={() => setIsPreviewOpen(false)}>
-          <button className="absolute top-6 right-6 p-2 bg-zinc-800 text-white rounded-xl hover:bg-zinc-700">
-            <X size={20} />
-          </button>
-          <img src={data.imageUrl || undefined} alt="Preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
-        </div>,
-        document.body
-      )}
-
-      {isPanoramaOpen && data.imageUrl && createPortal(
-        <div className="fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center backdrop-blur-sm" onClick={() => setIsPanoramaOpen(false)}>
-          <div className="absolute top-6 right-6 flex flex-col gap-3 z-50">
-            <button className="p-2.5 bg-zinc-800 text-white rounded-xl hover:bg-zinc-700 shadow-xl transition-all" onClick={() => setIsPanoramaOpen(false)}>
-              <X size={20} />
-            </button>
-            <button className="p-2.5 bg-[#00bcd4] text-white rounded-xl hover:bg-[#00bcd4]/80 shadow-xl transition-all" onClick={handlePanoramaScreenshot} title="全景截图提取为新节点">
-              <Camera size={20} />
-            </button>
-          </div>
-          <div className="w-[90vw] h-[90vh] rounded-xl overflow-hidden shadow-2xl relative" onClick={(e) => e.stopPropagation()}>
-            <CleanPanoramaViewer
-               ref={panoramaRef}
-               imageUrl={data.imageUrl}
-               spatialObjects={[]}
-               onSpaceClick={(yaw, pitch) => {
-                 // In the future this could add objects to the panorama
-               }}
-            />
-          </div>
-        </div>,
-        document.body
-      )}
-    </>
-  );
-};
-
-const VideoNode = ({ data, id, selected }: any) => {
-  const { updateNodeData, getNodes, getEdges, setNodes } = useReactFlow();
-  const [prompt, setPrompt] = useState(data.prompt || "");
-  const [loading, setLoading] = useState(data.isGenerating || false);
-  const [progressMsg, setProgressMsg] = useState(data.progressMsg || "");
-  const [activeTab, setActiveTab] = useState('文生视频');
-  const tabs = ['文生视频', '全能参考', '图生视频', '首尾帧', '图片参考'];
-
-  const [aspectRatio, setAspectRatio] = useState(data.aspectRatio || '16:9');
-  const [resolution, setResolution] = useState(data.resolution || '720P');
-  const [duration, setDuration] = useState(data.duration || 5);
-  const [audioEnabled, setAudioEnabled] = useState(data.audioEnabled || false);
-  const [showSettings, setShowSettings] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  React.useEffect(() => {
-    const node = getNodes().find(n => n.id === id);
-    if (node) {
-      const h = node.style?.height;
-      if (!h || (typeof h === 'number' && h < 240) || (typeof h === 'string' && parseInt(h, 10) < 240)) {
-        setNodes(nds => nds.map(n => n.id === id ? { ...n, style: { ...n.style, height: 240 } } : n));
-      }
-    }
-  }, [id, setNodes, getNodes]);
-
-  React.useEffect(() => {
-    const handleClickOutside = () => setShowSettings(false);
-    window.addEventListener('click', handleClickOutside);
-    return () => window.removeEventListener('click', handleClickOutside);
-  }, []);
-
-  const handleGenerate = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!prompt.trim()) return alert("请输入提示词");
-    
-    setLoading(true);
-    setProgressMsg("正在连接即梦服务...");
-    updateNodeData(id, { isGenerating: true, progressMsg: "正在连接即梦服务..." });
-    
-    try {
-      // Find incoming edge to get reference image
-      const edges = getEdges();
-      const nodes = getNodes();
-      const incomingEdges = edges.filter(edge => edge.target === id);
-      const referenceNodes = incomingEdges.map(edge => nodes.find(n => n.id === edge.source)).filter(Boolean);
-      const refImageNode = referenceNodes.find((n: any) => n?.type === 'imageNode' && n?.data?.imageUrl);
-      const referenceImage = (refImageNode?.data?.imageUrl as string) || null;
-      
-      const { generateDreaminaVideoAndWait } = await import('../api/dreaminaApi');
-      const finalVideoUrl = await generateDreaminaVideoAndWait(
-        prompt, 
-        referenceImage,
-        (status: string) => {
-          let msg = "";
-          if (status === "submitted") msg = "任务已提交，排队中...";
-          if (status === "processing") msg = "正在努力渲染中 (耗时约1-3分钟)...";
-          setProgressMsg(msg);
-          updateNodeData(id, { progressMsg: msg });
-        }
-      );
-      
-      setLoading(false);
-      setProgressMsg("");
-      updateNodeData(id, { videoUrl: finalVideoUrl, isGenerating: false, progressMsg: "", prompt });
-    } catch (err: any) {
-      alert("视频生成出错: " + err.message);
-      setLoading(false);
-      setProgressMsg("");
-      updateNodeData(id, { isGenerating: false, progressMsg: "" });
-    }
-  };
-
-  return (
-    <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={240} minHeight={100} isVisible={selected} keepAspectRatio={!!data.videoUrl} />
-      
-      {/* Node Label (Above Node) */}
-      <div className={`absolute -top-7 left-0 text-zinc-400 text-xs flex items-center gap-1.5 font-medium px-1 transition-opacity ${selected ? 'opacity-0' : 'opacity-100'}`}>
-        <Film size={14} />
-        {data.title || '视频节点'}
-      </div>
-
-      <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-0 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow w-full h-full flex flex-col relative pointer-events-auto`}>
-        <Handle type="target" position={Position.Left} className={handleStyle} />
-        
-        
-
-        {/* Media Area */}
-        <Handle type="source" position={Position.Right} className={handleStyle} />
-        <div className="flex-1 m-1 rounded-2xl overflow-hidden bg-[#1E1E1E] flex flex-col justify-center relative min-h-0">
-            {loading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center bg-zinc-900/80 backdrop-blur-sm z-10">
-              <Sparkles className="text-[#00bcd4] animate-pulse" size={28} />
-              <span className="text-xs text-[#00bcd4] font-medium animate-pulse">{progressMsg || "生成中..."}</span>
-            </div>
-          ) : data.videoUrl ? (
-            <video src={data.videoUrl || undefined} controls className="w-full h-full object-contain block bg-black nodrag" autoPlay loop />
-          ) : (
-             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-                 <Film size={48} className="opacity-40 text-zinc-600" />
-             </div>
-          )}
-
-          {/* Absolute Upload button inside media area when not loaded */}
-          {!data.videoUrl && !loading && (
-            <div className={`absolute top-4 right-4 transition-all duration-200 z-[100] opacity-0 group-hover:opacity-100`}>
-              <label className="flex items-center gap-2 px-3 py-1.5 bg-[#2A2A2A] border border-zinc-700 hover:bg-zinc-700 text-zinc-300 rounded-lg cursor-pointer text-sm shadow-[0_0_20px_rgba(0,0,0,0.5)] pointer-events-auto">
-                <Upload size={14} /> 上传
-                <input 
-                  type="file" 
-                  accept="video/*" 
-                  className="hidden" 
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        const url = ev.target?.result as string;
-                        if (data.onUpload) data.onUpload(id, url, 'video');
-                        else updateNodeData(id, { videoUrl: url });
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                  }} 
-                />
-              </label>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom Generation Panel (only show on selected) */}
-      {selected && (
-        <div 
-          className="absolute top-[calc(100%+16px)] left-0 bg-[#2A2A2A] border border-zinc-700/80 rounded-2xl shadow-xl p-4 flex flex-col min-w-[560px] min-h-[300px] w-[560px] z-[60] cursor-default overflow-visible nodrag"
-          onWheel={(e) => e.stopPropagation()}
-          onClick={e => {
-            e.stopPropagation();
-            setShowSettings(false);
-          }}
-        >
-             {/* Tabs Row */}
-             <div className="flex items-center justify-between mb-4">
-                 <div className="flex gap-2">
-                     {tabs.map(tab => (
-                         <button 
-                             key={tab} 
-                             onClick={(e) => { e.stopPropagation(); setActiveTab(tab); }}
-                             className={`px-3 py-1 text-xs rounded-lg transition-colors border border-transparent ${activeTab === tab ? 'bg-zinc-700 text-zinc-200 border-zinc-600' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700/50 hover:text-zinc-300'}`}
-                         >
-                             {tab}
-                         </button>
-                     ))}
-                 </div>
-                 <button className="text-zinc-500 hover:text-white p-1 transition-colors" title="展开">
-                     <Maximize size={14} />
-                 </button>
-             </div>
-             
-             {/* Tools Row */}
-             <div className="flex gap-3 mb-4">
-                 <button className="flex flex-col items-center justify-center gap-1.5 w-14 h-14 bg-zinc-800/80 border border-zinc-700/80 rounded-[14px] hover:bg-zinc-700 hover:border-zinc-600 transition-colors text-zinc-400 hover:text-zinc-200">
-                     <Camera size={16} strokeWidth={1.5} />
-                     <span className="text-[10px] font-medium">运镜</span>
-                 </button>
-                 <button className="flex flex-col items-center justify-center gap-1.5 w-14 h-14 bg-zinc-800/80 border border-zinc-700/80 rounded-[14px] hover:bg-zinc-700 hover:border-zinc-600 transition-colors text-zinc-400 hover:text-zinc-200">
-                     <User size={16} strokeWidth={1.5} />
-                     <span className="text-[10px] font-medium">角色库</span>
-                 </button>
-             </div>
-
-             {/* Text Area */}
-             <div className={`relative bg-zinc-800/50 border border-zinc-700/50 rounded-xl mb-6 group/textarea ${isExpanded ? 'z-50 shadow-2xl border-[#00bcd4]/50' : 'focus-within:border-zinc-500 focus-within:bg-zinc-800 transition-colors'}`}>
-               {isExpanded && (
-                  <div className="fixed inset-0 z-40 bg-black/20" onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}></div>
-               )}
-               <div className={`relative flex flex-col p-3 z-50 ${isExpanded ? 'bg-[#2A2A2A] rounded-xl' : ''}`}>
-                 <button 
-                   onClick={(e) => { 
-                     e.stopPropagation(); 
-                     setIsExpanded(!isExpanded); 
-                     if (!isExpanded && textareaRef.current) {
-                       setTimeout(() => {
-                          textareaRef.current!.style.height = 'auto';
-                          textareaRef.current!.style.height = textareaRef.current!.scrollHeight + 'px';
-                          textareaRef.current!.focus();
-                       }, 10);
-                     } else if (textareaRef.current) {
-                       textareaRef.current.style.height = 'auto';
-                     }
-                   }}
-                   className="absolute top-2 right-2 p-1.5 text-zinc-400 hover:text-white bg-zinc-800 rounded opacity-0 group-hover/textarea:opacity-100 transition-opacity z-10 hover:bg-zinc-700"
-                   title={isExpanded ? "收起" : "展开全文"}
-                   onMouseDown={(e) => e.stopPropagation()}
-                 >
-                   {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                 </button>
-                 <textarea
-                    ref={textareaRef}
-                    className={`w-full text-sm py-2 px-3 bg-transparent border-none focus:outline-none resize-y text-zinc-300 placeholder-zinc-500 nodrag nopan nowheel font-medium selection:bg-purple-500/30 custom-scrollbar pb-6 ${isExpanded ? 'min-h-[200px]' : 'min-h-[60px]'}`}
-                    placeholder="描述你想要生成的画面内容，@引用素材"
-                    value={prompt}
-                    onChange={(e) => { 
-                      setPrompt(e.target.value); 
-                      updateNodeData(id, { prompt: e.target.value });
-                      if (isExpanded && textareaRef.current) {
-                        textareaRef.current.style.height = 'auto';
-                        textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-                      }
-                    }}
-                    disabled={loading}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                 />
-               </div>
-             </div>
-
-            {/* Bottom Controls Row */}
-            <div className="flex items-center justify-between pt-3">
-                <div className="flex items-center gap-4">
-                    <button className="flex items-center gap-2 text-xs text-zinc-300 hover:text-white transition-colors">
-                        <span className="w-1 h-3 bg-[#FFC107] rounded-sm shadow-[0_0_8px_rgba(255,193,7,0.8)]"></span>
-                        <span className="font-bold flex items-center gap-1 tracking-wide">
-                            Seedance 2.0 VIP <ChevronDown size={14} className="text-zinc-500 ml-0.5" />
-                        </span>
-                    </button>
-                    <div className="relative">
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}
-                            className={`flex items-center gap-1.5 text-xs border px-2 py-1 rounded transition-colors ${showSettings ? 'border-zinc-500 text-white bg-zinc-800' : 'border-transparent text-zinc-300 hover:text-white hover:border-zinc-700'}`}
-                        >
-                            <Monitor size={14} />
-                            <span className="font-medium tracking-wide">
-                                {aspectRatio} · {resolution} · {duration}s · {audioEnabled ? '🔊' : '🔇'}
-                            </span> 
-                            <ChevronDown size={14} className={`text-zinc-500 transition-transform ${showSettings ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {/* Settings Popover */}
-                        {showSettings && (
-                            <div className="absolute top-[calc(100%+8px)] left-0 w-[300px] bg-[#2A2A2A] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-[100] flex flex-col gap-5 text-sm" onClick={(e) => e.stopPropagation()}>
-                                {/* 比例 */}
-                                <div>
-                                    <div className="text-zinc-400 mb-2.5 text-xs font-medium">比例</div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {['Auto', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].map(ratio => (
-                                            <button 
-                                                key={ratio}
-                                                onClick={() => { setAspectRatio(ratio); updateNodeData(id, { aspectRatio: ratio }); }}
-                                                className={`flex flex-col items-center justify-center w-12 h-14 rounded-lg transition-all border ${aspectRatio === ratio ? 'border-zinc-500 bg-white/5 shadow-[0_0_12px_rgba(255,255,255,0.15)] text-white' : 'border-zinc-800/50 bg-[#1A1A1A]/30 text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800'}`}
-                                            >
-                                                <div className={`border-2 rounded-[2px] mb-1 transition-colors ${aspectRatio === ratio ? 'border-white' : 'border-zinc-500'} 
-                                                  ${ratio === 'Auto' ? 'w-4 h-4' : 
-                                                    ratio === '16:9' ? 'w-5 h-3' : 
-                                                    ratio === '4:3' ? 'w-4 h-3' : 
-                                                    ratio === '1:1' ? 'w-4 h-4' : 
-                                                    ratio === '3:4' ? 'w-3 h-4' : 
-                                                    ratio === '9:16' ? 'w-3 h-5' : 
-                                                    'w-6 h-2.5'}`} 
-                                                />
-                                                <span className="text-[10px]">{ratio}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* 清晰度 */}
-                                <div>
-                                    <div className="text-zinc-400 mb-2.5 text-xs font-medium">清晰度</div>
-                                    <div className="flex gap-2">
-                                        {['480P', '720P', '1080P'].map(res => (
-                                            <button 
-                                                key={res}
-                                                onClick={() => { setResolution(res); updateNodeData(id, { resolution: res }); }}
-                                                className={`flex-1 py-1.5 rounded-lg text-xs transition-all border ${resolution === res ? 'border-zinc-500 bg-white/5 shadow-[0_0_12px_rgba(255,255,255,0.15)] text-white' : 'border-zinc-800/50 bg-[#1A1A1A]/30 text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800'}`}
-                                            >
-                                                {res}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* 视频时长 */}
-                                <div>
-                                    <div className="flex items-center justify-between text-zinc-400 mb-2 text-xs">
-                                        <span>视频时长</span>
-                                        <span className="text-zinc-300">{duration}s</span>
-                                    </div>
-                                    <input 
-                                        type="range" 
-                                        min="4" 
-                                        max="15" 
-                                        value={duration} 
-                                        onChange={(e) => {
-                                            const val = parseInt(e.target.value);
-                                            setDuration(val);
-                                            updateNodeData(id, { duration: val });
-                                        }}
-                                        className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-white"
-                                    />
-                                </div>
-
-                                {/* 生成音频 */}
-                                <div>
+                      <div>
                                     <div className="text-zinc-400 mb-2.5 text-xs flex items-center gap-1">
                                         生成音频 <HelpCircle size={12} className="text-zinc-500 cursor-pointer" />
                                     </div>
@@ -1321,7 +99,7 @@ const ResultNode = ({ data, id, selected }: any) => {
 const AudioNode = ({ data, id, selected }: any) => {
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={280} minHeight={120} isVisible={selected} />
+      <NodeResizer color="#00bcd4" handleClassName={resizerHandleStyle} minWidth={280} minHeight={120} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-2 shadow-sm hover:shadow-md transition-shadow min-w-[280px] w-full h-full flex flex-col`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center gap-2 px-2 py-2 text-zinc-400">
@@ -1375,7 +153,7 @@ const ScriptNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={440} minHeight={350} isVisible={selected} />
+      <NodeResizer color="#00bcd4" handleClassName={resizerHandleStyle} minWidth={440} minHeight={350} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow min-w-[440px] w-full h-full flex flex-col relative`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center justify-between mb-3 text-zinc-400 pb-2 border-b border-zinc-800/50 shrink-0">
@@ -1598,7 +376,7 @@ const AssetGroupNode = ({ data, id, selected }: any) => {
   
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={380} minHeight={200} isVisible={selected} />
+      <NodeResizer color="#00bcd4" handleClassName={resizerHandleStyle} minWidth={380} minHeight={200} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow min-w-[380px] w-full h-full flex flex-col relative`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-800/50">
@@ -1717,7 +495,7 @@ const ReviewResultNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={450} minHeight={450} isVisible={selected} />
+      <NodeResizer color="#00bcd4" handleClassName={resizerHandleStyle} minWidth={450} minHeight={450} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-0 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[450px] w-full h-full flex flex-col relative overflow-hidden`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         
@@ -1879,43 +657,17 @@ const edgeTypes = {
   animated: AnimatedEdge,
 };
 
-function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }: { projectId: string; projectName: string; groupId: string; groupName: string; onBackToProjects: () => void }) {
+function Canvas({ projectId, projectName, onBackToProjects }: { projectId: string; projectName: string; onBackToProjects: () => void }) {
   const navigate = useNavigate();
-  const { getNode, getNodes, getEdges, fitView, screenToFlowPosition, getViewport } = useReactFlow();
-  const [nodes, setNodes, onNodesChangeOriginal] = useNodesState([]);
-  const [edges, setEdges, onEdgesChangeOriginal] = useEdgesState([]);
-  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
-  const [showVersionPanel, setShowVersionPanel] = useState(false);
-  const [showProjectSettings, setShowProjectSettings] = useState(false);
-  const [showCanvasMenu, setShowCanvasMenu] = useState(false);
-  const [showAssetLibrary, setShowAssetLibrary] = useState(false);
-  const [showTaskQueue, setShowTaskQueue] = useState(false);
-  const [showPromptTemplates, setShowPromptTemplates] = useState(false);
-
-  const { saveHistory, undo, redo, canUndo, canRedo } = useCanvasHistory(projectId, nodes, edges, setNodes as any, setEdges as any);
-
-  const onNodesChange = useCallback((changes: any[]) => {
-    const removeChanges = changes.filter(c => c.type === 'remove');
-    if (removeChanges.length > 0) {
-      saveHistory('delete_node');
-    }
-    onNodesChangeOriginal(changes);
-  }, [onNodesChangeOriginal, saveHistory]);
-
-  const onEdgesChange = useCallback((changes: any[]) => {
-    const removeChanges = changes.filter(c => c.type === 'remove');
-    if (removeChanges.length > 0) {
-      saveHistory('delete_edge');
-    }
-    onEdgesChangeOriginal(changes);
-  }, [onEdgesChangeOriginal, saveHistory]);
-
-  const [menu, setMenu] = useState<{ id: string; top: number; left: number, type?: 'node' | 'pane' | 'selection' | 'add-node' | 'add-connected-node', sourceNodeId?: string, nodeType?: string } | null>(null);
+  const { getNode, getNodes, getEdges } = useReactFlow();
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [menu, setMenu] = useState<{ id: string; top: number; left: number, type?: 'node' | 'pane' | 'add-node' | 'add-connected-node', sourceNodeId?: string, nodeType?: string } | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [clipboard, setClipboard] = useState<{ type: 'node' | 'image', data: any } | null>(null);
   const [toast, setToast] = useState<{ message: string, visible: boolean }>({ message: '', visible: false });
   const [globalProgress, setGlobalProgress] = useState<{ visible: boolean, text: string, progress: number }>({ visible: false, text: '', progress: 0 });
-  const [activeSidebarPopover, setActiveSidebarPopover] = useState<'add' | 'assets' | 'team-assets' | 'script' | null>(null);
+  const [activeSidebarPopover, setActiveSidebarPopover] = useState<'add' | 'assets' | null>(null);
   const [activeRightPanel, setActiveRightPanel] = useState<{ type: MediaCapability, nodeId: string } | null>(null);
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
 
@@ -1944,13 +696,6 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
     }
   }, [nodes, edges, projectId, projectName, initialDataLoaded]);
 
-  const [settings, setSettings] = useState<any>(null);
-
-  // Load project settings initially
-  React.useEffect(() => {
-    projectSettingsService.getSettings(projectId).then(setSettings);
-  }, [projectId]);
-
   // Load project initially
   React.useEffect(() => {
     const loadData = async () => {
@@ -1972,14 +717,13 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
 
   // Auto-save when nodes or edges change
   React.useEffect(() => {
-    if (initialDataLoaded && settings?.system?.autoSave !== false) {
-      const intervalMs = settings?.system?.autoSaveIntervalMs || 30000;
+    if (initialDataLoaded) {
       const timer = setTimeout(() => {
         handleSaveProject(nodes, edges);
-      }, intervalMs < 1000 ? 1000 : 1000); // Keep debounce low or use interval? Actually using a simple debounce is fine here. Let's stick with 1.5s debounce for UI performance, but respect autoSave toggle.
+      }, 1000); // debounce 1s
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges, handleSaveProject, initialDataLoaded, settings]);
+  }, [nodes, edges, handleSaveProject, initialDataLoaded]);
 
   const handleLoadProject = useCallback(() => {
     // Deprecated for direct manual load, handled by initial effect
@@ -1996,16 +740,13 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
   }, []);
 
   const onConnect = useCallback(
-    (params: Connection) => {
-      saveHistory('connect_edge');
-      setEdges((eds) => addEdge({ 
-        ...params, 
-        type: 'animated',
-        animated: true, 
-        style: { stroke: '#00bcd4', strokeWidth: 2.5, filter: 'drop-shadow(0 0 8px rgba(0,188,212,0.8))' }
-      }, eds));
-    },
-    [setEdges, saveHistory]
+    (params: Connection) => setEdges((eds) => addEdge({ 
+      ...params, 
+      type: 'animated',
+      animated: true, 
+      style: { stroke: '#00bcd4', strokeWidth: 2.5, filter: 'drop-shadow(0 0 8px rgba(0,188,212,0.8))' }
+    }, eds)),
+    [setEdges],
   );
 
   const handleImageAction = useCallback((id: string, action: string, payload?: any) => {
@@ -2098,7 +839,6 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
   }, [getNodes, setNodes, setEdges, showToast]);
 
   const updateNodeData = useCallback((id: string, key: string, value: any) => {
-    saveHistory('update_node', id);
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === id) {
@@ -2163,26 +903,7 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
   }, [updateNodeData]);
 
   const handleContextMenuAction = useCallback((action: string) => {
-    if (!menu) {
-      return;
-    }
-    
-    if (menu.type === 'selection') {
-      if (action === 'delete') {
-        const selectedNodes = nodes.filter(n => n.selected);
-        const nodesToDelete = selectedNodes.map(n => n.id);
-        if (nodesToDelete.length > 0) {
-          saveHistory('delete_node');
-          setNodes(nds => nds.filter(n => !nodesToDelete.includes(n.id)));
-          setEdges(eds => eds.filter(e => !nodesToDelete.includes(e.source) && !nodesToDelete.includes(e.target)));
-          showToast(`已删除 ${nodesToDelete.length} 个节点`);
-        }
-      }
-      setMenu(null);
-      return;
-    }
-
-    if (menu.type !== 'node') {
+    if (!menu || menu.type !== 'node') {
       setMenu(null);
       return;
     }
@@ -2259,17 +980,9 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
         break;
       }
       case 'delete':
-        const selectedNodes = nodes.filter(n => n.selected);
-        let nodesToDelete = [nodeId];
-        // If right-clicked node is part of a multiple selection, delete all selected nodes
-        if (selectedNodes.length > 1 && selectedNodes.some(n => n.id === nodeId)) {
-            nodesToDelete = selectedNodes.map(n => n.id);
-        }
-        
-        saveHistory('delete_node');
-        setNodes(nds => nds.filter(n => !nodesToDelete.includes(n.id)));
-        setEdges(eds => eds.filter(e => !nodesToDelete.includes(e.source) && !nodesToDelete.includes(e.target)));
-        showToast(nodesToDelete.length > 1 ? `已删除 ${nodesToDelete.length} 个节点` : '节点已删除');
+        setNodes(nds => nds.filter(n => n.id !== nodeId));
+        setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
+        showToast('节点已删除');
         break;
       case 'copy-clipboard':
         const contentToCopy = node.data.imageUrl || node.data.text || node.data.content || JSON.stringify(node.data);
@@ -2328,22 +1041,15 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
     const inputNodes = incomingEdges.map(e => currentNodes.find(n => n.id === e.source)).filter(Boolean);
 
     updateNodeData(nodeId, 'isGenerating', true);
-    let task = null;
 
     try {
       if (node.data.type === 'text2image') {
         const textInput = inputNodes.find(n => n?.type === 'textNode')?.data.text as string;
         if (!textInput) throw new Error("Requires text input");
         
-        task = await taskQueueManager.enqueueTask(projectId, 'image_generation', { prompt: textInput }, nodeId);
-        await taskQueueManager.updateTaskStatus(projectId, task.id, 'running');
-        
         const imageUrl = await runImageGeneration(textInput);
         
         if (imageUrl) {
-          await taskQueueManager.updateTaskStatus(projectId, task.id, 'completed', { url: imageUrl });
-          await assetManager.registerAsset(projectId, { type: 'image', url: imageUrl, name: `Generated Image ${task.id.slice(0, 4)}` });
-          
           // Create a new image node connected to this AI node
           const newNodeId = `image-${Date.now()}`;
           const newNode = {
@@ -2355,8 +1061,6 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
           };
           setNodes(nds => [...nds, newNode]);
           setEdges(eds => [...eds, { id: `e-${nodeId}-${newNodeId}`, source: nodeId, target: newNodeId, animated: true }]);
-        } else {
-          throw new Error('Image generation failed');
         }
       } else if (node.data.type === 'image2prompt') {
         const imageInput = inputNodes.find(n => n?.type === 'imageNode')?.data.imageUrl as string;
@@ -2367,7 +1071,7 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
         
         const ai = getAIClient();
         const response = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
+          model: 'gemini-3-flash-preview',
           contents: [
             { inlineData: { data: base64Data, mimeType } },
             "Analyze the style, composition, lighting, and subject of this image. Generate a highly detailed, comma-separated prompt that could be used to recreate this image or generate something in the exact same style. Focus on visual keywords."
@@ -2435,17 +1139,12 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
         
         import('../config/prompts').then(async ({ SINGLE_FRAME_REPAINT_PROMPT }) => {
           try {
-            task = await taskQueueManager.enqueueTask(projectId, 'image_generation', { prompt: 'Single Frame Repaint' }, nodeId);
-            await taskQueueManager.updateTaskStatus(projectId, task.id, 'running');
-            
             contents.push(SINGLE_FRAME_REPAINT_PROMPT);
             const ai = getAIClient();
             const response = await ai.models.generateContent({
-              model: 'gemini-3.1-pro-preview',
+              model: 'gemini-3-flash-preview',
               contents: contents
             });
-            
-            await taskQueueManager.updateTaskStatus(projectId, task.id, 'completed', { text: response.text });
             
             // Generate a text node with the prompt
             const textNodeId = `text-${Date.now()}`;
@@ -2459,9 +1158,6 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
             setNodes(nds => [...nds, newNode]);
             setEdges(eds => [...eds, { id: `e-${nodeId}-${textNodeId}`, source: nodeId, target: textNodeId, animated: true }]);
           } catch(err: any) {
-            if (task) {
-              await taskQueueManager.updateTaskStatus(projectId, task.id, 'failed', undefined, err.message);
-            }
             console.error("Single Frame Repaint failed:", err);
             showToast(err.message || '生成重绘指令失败');
           } finally {
@@ -2471,15 +1167,12 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
         return; // Early return since we call updateNodeData in the promise
       }
     } catch (error: any) {
-      if (task) {
-        await taskQueueManager.updateTaskStatus(projectId, task.id, 'failed', undefined, error.message);
-      }
       console.error("AI Generation failed:", error);
       alert(`Generation failed: ${error.message}`);
     } finally {
       updateNodeData(nodeId, 'isGenerating', false);
     }
-  }, [nodes, edges, setNodes, setEdges, updateNodeData, handleTextChange, projectId]);
+  }, [nodes, edges, setNodes, setEdges, updateNodeData, handleTextChange]);
 
   const handleNodeFileUpload = useCallback((nodeId: string, url: string, fileType: 'image' | 'video' | 'audio') => {
     setNodes(nds => nds.map(n => {
@@ -2658,30 +1351,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
   const addNode = (type: string, aiType?: string, pos?: { x: number, y: number }, sourceNodeId?: string, extraParams?: any) => {
     const id = `${type}-${Date.now()}`;
     const sourceNode = sourceNodeId ? getNode(sourceNodeId) : null;
-    let actualPosition = pos;
-    if (!actualPosition) {
-      if (sourceNode) {
-        actualPosition = {
-          x: sourceNode.position.x + (type === 'scriptNode' ? 500 : 400),
-          y: sourceNode.position.y
-        };
-      } else {
-        // Find center of current viewport using screenToFlowPosition
-        if (reactFlowWrapper.current) {
-          const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
-          actualPosition = screenToFlowPosition({
-            x: reactFlowBounds.x + reactFlowBounds.width / 2,
-            y: reactFlowBounds.y + reactFlowBounds.height / 2
-          });
-          // Add a small random offset if multiple nodes are added to center
-          actualPosition.x += Math.random() * 50 - 25;
-          actualPosition.y += Math.random() * 50 - 25;
-        } else {
-          actualPosition = { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 };
-        }
-      }
-    }
-    const position = actualPosition;
+    const position = pos || { 
+      x: sourceNode ? sourceNode.position.x + (type === 'scriptNode' ? 500 : 400) : Math.random() * 200 + 100, 
+      y: sourceNode ? sourceNode.position.y : Math.random() * 200 + 100 
+    };
     
     // Auto-generate script audit
     if (aiType && aiType.startsWith('script-review') && sourceNodeId) {
@@ -3091,6 +1764,8 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
     }
   };
 
+  const { fitView, screenToFlowPosition } = useReactFlow();
+
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
@@ -3235,25 +1910,9 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
     [setMenu]
   );
 
-  const onSelectionContextMenu = useCallback(
-    (event: React.MouseEvent, selectedNodes: Node[]) => {
-      event.preventDefault();
-      setMenu({
-        id: 'selection',
-        top: event.clientY,
-        left: event.clientX,
-        type: 'selection'
-      });
-    },
-    [setMenu]
-  );
-
   const [fullscreenNodeId, setFullscreenNodeId] = useState<string | null>(null);
 
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
-    if (node.type === 'imageNode' || node.type === 'videoNode' || node.type === 'resultNode') {
-      return;
-    }
     setFullscreenNodeId(node.id);
   }, []);
 
@@ -3350,46 +2009,19 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
       
       {/* Floating Top Toolbar */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[100] bg-[#111214]/80 backdrop-blur-xl border border-zinc-800/80 rounded-2xl shadow-lg flex items-center p-1.5 gap-1">
-        <button onClick={() => setShowProjectSettings(true)} className="px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors">
-          {settings?.project?.name || projectName || '未命名项目'}
+        <button className="px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors">
+          项目设置
         </button>
         <div className="w-px h-5 bg-zinc-800 mx-1"></div>
         <button onClick={() => fitView({ duration: 800 })} className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors tooltip" title="居中对齐">
           <Eye size={16} />
         </button>
-        <button onClick={() => window.location.reload()} className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors tooltip" title="刷新画布">
+        <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors tooltip" title="项目历史记录">
           <RotateCw size={16} />
         </button>
-        <div className="relative">
-          <button onClick={() => setShowCanvasMenu(!showCanvasMenu)} className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors tooltip" title="更多">
-            <Settings size={16} />
-          </button>
-          {showCanvasMenu && (
-            <div className="absolute top-full mt-2 right-0">
-               <CanvasMoreMenu 
-                  onAction={async (actionId) => {
-                    if (actionId === 'health-check') {
-                      const res = await canvasHealthCheck.inspect(nodes, edges);
-                      if (res.issues.length === 0) {
-                        showToast(`健康检查通过 (得分 ${res.score})`);
-                      } else {
-                        showToast(`健康检查发现 ${res.issues.length} 个问题`);
-                      }
-                    } else if (actionId === 'export-json') {
-                      canvasActionService.exportCurrentCanvas(projectId, nodes, edges);
-                    } else if (actionId === 'view-history') {
-                      setShowHistoryPanel(true);
-                    } else if (actionId === 'view-queue') {
-                      setShowTaskQueue(true);
-                    } else if (actionId === 'view-logs') {
-                       showToast("操作日志功能敬请期待");
-                    }
-                  }} 
-                  onClose={() => setShowCanvasMenu(false)} 
-                />
-            </div>
-          )}
-        </div>
+        <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors tooltip" title="更多">
+          <Settings size={16} />
+        </button>
       </div>
 
       {/* Sidebar UI */}
@@ -3409,10 +2041,7 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
             <span className="absolute left-full ml-3 px-2 py-1 bg-[#2D2D2D] border border-zinc-700/50 text-xs text-zinc-200 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">我的工具箱</span>
           </button>
 
-          <button 
-            onClick={() => setShowHistoryPanel(true)}
-            className="flex items-center justify-center w-10 h-10 text-zinc-400 hover:text-white rounded-xl transition-colors group relative"
-          >
+          <button className="flex items-center justify-center w-10 h-10 text-zinc-400 hover:text-white rounded-xl transition-colors group relative">
             <Clock size={18} />
             <span className="absolute left-full ml-3 px-2 py-1 bg-[#2D2D2D] border border-zinc-700/50 text-xs text-zinc-200 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">历史记录</span>
           </button>
@@ -3426,25 +2055,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
               <span className="absolute left-full ml-3 px-2 py-1 bg-[#2D2D2D] border border-zinc-700/50 text-xs text-zinc-200 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">我的素材</span>
             )}
           </button>
-
-          <button 
-            onClick={() => setActiveSidebarPopover(p => p === 'team-assets' ? null : 'team-assets')} 
-            className={`flex items-center justify-center w-10 h-10 rounded-xl transition-colors group relative ${activeSidebarPopover === 'team-assets' ? 'bg-[#00bcd4]/20 text-[#00bcd4]' : 'text-[#00bcd4]/70 hover:text-[#00bcd4] hover:bg-[#00bcd4]/10'}`}
-          >
-            <Briefcase size={18} />
-            {activeSidebarPopover !== 'team-assets' && (
-              <span className="absolute left-full ml-3 px-2 py-1 bg-[#2D2D2D] border border-zinc-700/50 text-xs text-zinc-200 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">小组资产</span>
-            )}
-          </button>
           
-          <button 
-            onClick={() => setActiveSidebarPopover(p => p === 'script' ? null : 'script')} 
-            className={`flex items-center justify-center w-10 h-10 rounded-xl transition-colors group relative ${activeSidebarPopover === 'script' ? 'bg-indigo-500/20 text-indigo-400' : 'text-indigo-400/70 hover:text-indigo-400 hover:bg-indigo-500/10'}`}
-          >
-            <List size={18} />
-            {activeSidebarPopover !== 'script' && (
-              <span className="absolute left-full ml-3 px-2 py-1 bg-[#2D2D2D] border border-zinc-700/50 text-xs text-zinc-200 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">剧本分镜</span>
-            )}
+          <button className="flex items-center justify-center w-10 h-10 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition-colors group relative">
+            <Clock size={18} />
+            <span className="absolute left-full ml-3 px-2 py-1 bg-[#2D2D2D] border border-zinc-700/50 text-xs text-zinc-200 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">历史记录</span>
           </button>
           
           <div className="w-6 h-px bg-zinc-800 my-1"></div>
@@ -3485,11 +2099,30 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
                   </div>
                   <span className="text-sm flex-1 text-left">音频</span>
                 </button>
+                <button onClick={() => { addNode('scriptNode'); setActiveSidebarPopover(null); }} className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-200">
+                  <div className="w-7 h-7 rounded-lg bg-zinc-800/80 flex items-center justify-center text-zinc-400">
+                    <FileText size={14} />
+                  </div>
+                  <span className="text-sm flex-1 text-left">脚本</span>
+                </button>
                 <button className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-200">
                   <div className="w-7 h-7 rounded-lg bg-zinc-800/80 flex items-center justify-center text-zinc-400">
                     <Scissors size={14} />
                   </div>
                   <span className="text-sm flex-1 text-left">视频合成</span>
+                  <span className="bg-zinc-800 text-zinc-500 text-[10px] px-1.5 py-0.5 rounded leading-none">Beta</span>
+                </button>
+                <button className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-200">
+                  <div className="w-7 h-7 rounded-lg bg-zinc-800/80 flex items-center justify-center text-zinc-400">
+                    <AudioLines size={14} />
+                  </div>
+                  <span className="text-sm">音频</span>
+                </button>
+                <button className="flex items-center gap-3 w-full px-2 py-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-200">
+                  <div className="w-7 h-7 rounded-lg bg-zinc-800/80 flex items-center justify-center text-zinc-400">
+                    <FileText size={14} />
+                  </div>
+                  <span className="text-sm flex-1 text-left">脚本</span>
                   <span className="bg-zinc-800 text-zinc-500 text-[10px] px-1.5 py-0.5 rounded leading-none">Beta</span>
                 </button>
               </div>
@@ -3507,15 +2140,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
                      if (file) {
                        const reader = new FileReader();
                        reader.onload = (ev) => {
-                         const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                         const position = rect 
-                           ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                           : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                         
                          const newNode = {
                            id: `image-${Date.now()}`,
                            type: 'imageNode',
-                           position,
+                           position: { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 },
                            style: { width: 320, height: 320 },
                            data: { imageUrl: ev.target?.result, onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
                          };
@@ -3574,15 +2202,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
               <div 
                 className="flex flex-col gap-2 group cursor-pointer"
                 onClick={() => {
-                  const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                  const position = rect 
-                    ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                    : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                  
                   const newNode = {
                     id: `image-${Date.now()}`,
                     type: 'imageNode',
-                    position,
+                    position: { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 },
                     style: { width: 320, height: 320 },
                     data: { imageUrl: 'https://images.unsplash.com/photo-1590483866874-5bebc2de714f?auto=format&fit=crop&q=80&w=400&h=400', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
                   };
@@ -3599,15 +2222,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
               <div 
                 className="flex flex-col gap-2 group cursor-pointer"
                 onClick={() => {
-                  const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                  const position = rect 
-                    ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                    : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                  
                   const newNode = {
                     id: `image-${Date.now()}`,
                     type: 'imageNode',
-                    position,
+                    position: { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 },
                     style: { width: 320, height: 320 },
                     data: { imageUrl: 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&q=80&w=400&h=400', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
                   };
@@ -3624,15 +2242,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
               <div 
                 className="flex flex-col gap-2 group cursor-pointer"
                 onClick={() => {
-                  const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                  const position = rect 
-                    ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                    : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                  
                   const newNode = {
                     id: `image-${Date.now()}`,
                     type: 'imageNode',
-                    position,
+                    position: { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 },
                     style: { width: 320, height: 320 },
                     data: { imageUrl: 'https://images.unsplash.com/photo-1542157585-ef20bfcce579?auto=format&fit=crop&q=80&w=400&h=400', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
                   };
@@ -3649,42 +2262,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
             </div>
           </div>
         )}
-
-        {/* Team Assets Popover */}
-        {activeSidebarPopover === 'team-assets' && (
-          <div className="bg-[#1C1C1E] border border-zinc-800/80 rounded-[20px] shadow-2xl w-[480px] h-[600px] flex flex-col animate-in fade-in zoom-in-95 duration-200 pointer-events-auto overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
-              <h2 className="text-[#00bcd4] font-medium text-[15px]">团队共享资产库</h2>
-              <button onClick={() => setActiveSidebarPopover(null)} className="text-zinc-500 hover:text-white transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden">
-               <SharedAssetLibrary groupId={groupId} />
-            </div>
-          </div>
-        )}
-
-        {/* Script & Storyboard Popover */}
-        {activeSidebarPopover === 'script' && (
-          <div className="bg-[#1C1C1E] border border-zinc-800/80 rounded-[20px] shadow-2xl w-[420px] h-[600px] flex flex-col animate-in fade-in zoom-in-95 duration-200 pointer-events-auto overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
-              <h2 className="text-indigo-400 font-medium text-[15px]">剧本与分镜</h2>
-              <button onClick={() => setActiveSidebarPopover(null)} className="text-zinc-500 hover:text-white transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-hidden">
-               <ScriptStoryboardPanel projectId={projectId} groupId={groupId} />
-            </div>
-          </div>
-        )}
       </div>
       
       <div className="w-full h-full" ref={reactFlowWrapper}>
         <ReactFlow
-          deleteKeyCode={['Backspace', 'Delete']}
-          onNodeDragStop={(event, node) => saveHistory('move_node', node.id)}
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
@@ -3693,7 +2274,6 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
           onConnectEnd={onConnectEnd}
           onPaneClick={onPaneClick}
           onPaneContextMenu={onPaneContextMenu}
-          onSelectionContextMenu={onSelectionContextMenu}
           onNodeContextMenu={onNodeContextMenu}
           onNodeDoubleClick={onNodeDoubleClick}
           onEdgeDoubleClick={onEdgeDoubleClick}
@@ -3727,32 +2307,14 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
               </svg>
               <span className="text-sm">主页</span>
             </button>
-            <div className="flex items-center bg-zinc-800/80 backdrop-blur-md rounded-xl shadow-lg border border-zinc-700/50 p-1 mx-2">
-              <button onClick={undo} disabled={!canUndo} className="p-1.5 text-zinc-400 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors" title="撤销 (Ctrl+Z)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
-              </button>
-              <button onClick={redo} disabled={!canRedo} className="p-1.5 text-zinc-400 hover:text-white disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors" title="重做 (Ctrl+Y)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
-              </button>
-            </div>
-            
-            <div className="flex items-center bg-zinc-800/80 backdrop-blur-md rounded-xl shadow-lg border border-zinc-700/50 px-3 py-1.5 mx-2 min-w-[200px]">
-               <svg className="w-4 h-4 text-zinc-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-               </svg>
-               <input
-                 type="text"
-                 placeholder="搜索与筛选节点..."
-                 className="bg-transparent text-sm text-white focus:outline-none w-full placeholder-zinc-500"
-                 onChange={(e) => {
-                    const query = e.target.value.toLowerCase();
-                    setNodes(nds => nds.map(n => ({
-                      ...n,
-                      hidden: query ? !JSON.stringify(n).toLowerCase().includes(query) : false
-                    })));
-                 }}
-               />
-            </div>
+            <button
+              onClick={onBackToProjects}
+              className="px-4 py-2 bg-zinc-800/80 hover:bg-zinc-700/80 backdrop-blur-md text-[#00bcd4] font-medium rounded-xl shadow-lg border border-zinc-700/50 hover:border-[#00bcd4]/50 transition-all flex items-center gap-2 cursor-pointer"
+              title="项目记录"
+            >
+              <RotateCw size={16} />
+              <span className="text-sm">项目记录</span>
+            </button>
             <div className="px-4 py-2 bg-zinc-900/50 backdrop-blur-md text-zinc-500 font-medium rounded-xl border border-zinc-800 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500/80 animate-pulse"></span>
               <span className="text-xs">
@@ -3843,18 +2405,6 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
 
             <button className="flex items-center justify-between px-3 py-2 text-zinc-200 hover:bg-[#343434] hover:text-white text-left w-full" onClick={() => handleContextMenuAction('copy-clipboard')}>
               <span>复制到剪贴板</span>
-            </button>
-          </div>
-        )}
-
-        {menu && menu.type === 'selection' && (
-          <div 
-            className="fixed z-[1000] bg-[#242424] border border-zinc-800 rounded-xl shadow-2xl min-w-[200px] py-2 flex flex-col font-medium"
-            style={{ top: menu.top, left: menu.left }}
-          >
-            <button className="flex items-center justify-between px-4 py-2 hover:bg-[#343434] text-rose-500 text-left w-full transition-colors text-sm" onClick={() => handleContextMenuAction('delete')}>
-              <span>删除选中项</span>
-              <span className="text-zinc-500 text-xs text-rose-500/50">⌘⌫</span>
             </button>
           </div>
         )}
@@ -4062,363 +2612,78 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
                                 <span className="font-medium text-amber-500 text-lg">{prop.name}</span>
                                 <span className="text-xs text-zinc-400 bg-zinc-800/50 px-2 py-1 rounded">归属: {prop.owner}</span>
                               </div>
-                              <div className="text-sm space-y-2 text-zinc-300 bg-zinc-900/30 p-3 rounded-lg border border-zinc-800/30">
-                                <div><span className="text-zinc-500 mr-2">初始位置:</span>{prop.initPosition}</div>
-                                <div><span className="text-zinc-500 mr-2">出现时机:</span>{prop.appearTime}</div>
-                                <div><span className="text-zinc-500 mr-2">离手时机:</span>{prop.dropTime}</div>
-                                <div><span className="text-zinc-500 mr-2">使用动作:</span>{prop.usage}</div>
-                                <div><span className="text-zinc-500 mr-2">进入下场:</span>{prop.nextScene ? '是' : '否 - 本场结束'}</div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="text-lg font-medium text-zinc-100 mb-4 pb-2 border-b border-zinc-800">核心动作链 (Action Chain)</h3>
-                        <div className="bg-zinc-800/30 p-6 rounded-xl border border-zinc-800/50 flex flex-wrap items-center gap-3 text-[#00bcd4] font-medium text-base">
-                          {bd.actionChain.map((a, i) => (
-                            <React.Fragment key={i}>
-                              <div className="bg-zinc-900/50 px-4 py-2 rounded-lg border border-[#00bcd4]/20 shadow-sm">{a}</div>
-                              {i < bd.actionChain.length - 1 && <span className="text-zinc-600">→</span>}
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <h3 className="text-lg font-medium text-zinc-100 mb-4 pb-2 border-b border-zinc-800">Beat 列表</h3>
-                        <div className="space-y-4">
-                          {bd.beats.map((beat, i) => (
-                            <div key={i} className="bg-zinc-800/20 rounded-xl p-5 border-l-4 border-l-purple-500 border border-zinc-800/50 pl-6 relative">
-                              <div className="absolute left-0 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-zinc-900 border-2 border-purple-500 flex items-center justify-center text-xs font-bold font-mono text-zinc-300 shadow-md">
-                                {beat.beatNo}
-                              </div>
-                              <div className="text-xs text-zinc-500 mb-3">属于: 场次 {beat.sceneNo}</div>
-                              <div className="flex items-center gap-3 text-sm font-medium text-zinc-200 mb-4 bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/30">
-                                <span>{beat.start}</span>
-                                <span className="text-zinc-600">→</span>
-                                <span>{beat.end}</span>
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                <div className="space-y-2">
-                                  <div><span className="text-zinc-500 block mb-1">主要动作</span><span className="text-zinc-200">{beat.action}</span></div>
-                                  <div><span className="text-zinc-500 block mb-1">台词承载</span><span className="text-zinc-400">{beat.dialogueLoad}</span></div>
-                                </div>
-                                <div className="space-y-2">
-                                  <div><span className="text-zinc-500 block mb-1">情绪变化</span><span className="text-rose-400/90 font-medium">{beat.emotionChange}</span></div>
-                                  <div><span className="text-zinc-500 block mb-1">视觉重点</span><span className="text-[#00bcd4]">{beat.visualFocus}</span></div>
+                                        <div><span className="text-zinc-500 block mb-1">视觉重点</span><span className="text-[#00bcd4]">{beat.visualFocus}</span></div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+interface ProjectMeta {  />
+      )}
+    </div>
+  );
+}
 
-                      <div>
-                        <h3 className="text-lg font-medium text-zinc-100 mb-4 pb-2 border-b border-zinc-800 text-rose-400">连贯性与风险预警</h3>
-                        <div className="space-y-2 bg-rose-500/5 p-6 rounded-xl border border-rose-500/20">
-                          {bd.continuityRisks.map((risk, i) => (
-                            <div key={i} className="flex gap-3 items-start text-sm bg-rose-500/10 p-3 rounded-lg border border-rose-500/20">
-                              <div className="text-rose-500 mt-0.5 shrink-0"><Zap size={16} /></div>
-                              <span className="text-zinc-200 leading-relaxed">{risk}</span>
-                            </div>
-                          ))}
-                          {(!bd.continuityRisks || bd.continuityRisks.length === 0) && (
-                            <div className="text-zinc-500 text-center py-4">暂无发现明显连贯性风险</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })() : (
-                 <table className="w-full text-base text-left">
-                  <thead className="text-zinc-500 border-b border-zinc-800">
-                    <tr><th className="pb-4 font-medium w-16">镜号</th><th className="pb-4 font-medium">画面描述</th><th className="pb-4 font-medium w-32">景别</th></tr>
-                  </thead>
-                  <tbody className="text-zinc-300">
-                    {nodes.find(n => n.id === fullscreenNodeId)?.data?.script?.map((row, i) => (
-                      <tr key={i} className="border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/30 transition-colors">
-                        <td className="py-4 text-zinc-500 align-top">{i + 1}</td>
-                        <td className="py-4 pr-4 align-top">{row.description}</td>
-                        <td className="py-4 text-zinc-500 align-top">{row.shotType || '-'}</td>
-                      </tr>
+interface ProjectMeta {e={`w-8 h-8 rounded-lg text-sm border ${num === 4 ? 'border-[#00bcd4] bg-[#00bcd4]/10 text-[#00bcd4]' : 'border-zinc-800 text-zinc-400 hover:text-white'}`}>{num}</button>
                     ))}
-                  </tbody>
-                 </table>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Toast Notification */}
-      {toast.visible && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[2000] bg-zinc-800 text-white px-4 py-2 rounded-xl shadow-2xl text-sm animate-in slide-in-from-bottom-5">
-          {toast.message}
-        </div>
-      )}
-
-      
-{showHistoryPanel && <HistoryPanel projectId={projectId} onClose={() => setShowHistoryPanel(false)} />}
-{showVersionPanel && <VersionPanel projectId={projectId} onClose={() => setShowVersionPanel(false)} onRestore={(state) => {
-  setNodes(state.nodes);
-  setEdges(state.edges);
-  showToast('已恢复至历史版本');
-}} />}
-{showProjectSettings && <ProjectSettingsPanel projectId={projectId} onClose={() => setShowProjectSettings(false)} />}
-{showAssetLibrary && <AssetLibrary projectId={projectId} onClose={() => setShowAssetLibrary(false)} />}
-{showTaskQueue && <TaskQueuePanel projectId={projectId} onClose={() => setShowTaskQueue(false)} />}
-{showPromptTemplates && <PromptTemplatePanel onSelect={(t) => showToast('已选择模板: ' + t.slice(0, 10) + '...')} onClose={() => setShowPromptTemplates(false)} />}
-      {/* Right Properties Panel */}
-      {activeRightPanel && (
-         <CapabilityPanel 
-            capabilityId={activeRightPanel.type}
-            onClose={() => setActiveRightPanel(null)}
-            onSuccess={(url) => {
-               if (activeRightPanel.nodeId) {
-                  setNodes(nds => nds.map(n => {
-                     if (n.id === activeRightPanel.nodeId) {
-                        return { 
-                           ...n, 
-                           data: { 
-                              ...n.data, 
-                              imageUrl: activeRightPanel.type.includes('image') ? url : n.data.imageUrl, 
-                              videoUrl: activeRightPanel.type.includes('video') ? url : n.data.videoUrl,
-                              isGenerating: false 
-                           } 
-                        };
-                     }
-                     return n;
-                  }));
-               }
-               setActiveRightPanel(null);
-               showToast('生成成功');
-            }}
-         />
-      )}
-    </div>
-  );
-}
-
-interface ProjectMeta {
-  id: string;
-  name: string;
-  updatedAt: number;
-}
-
-function ProjectSelectionOverlay({ onSelectProject, onClose, renderTopRight }: { onSelectProject: (id: string, name: string) => void, onClose?: () => void, renderTopRight?: React.ReactNode }) {
-  const [projects, setProjects] = useState<ProjectMeta[]>([]);
-
-  const fetchProjects = React.useCallback(async () => {
-    let apiProjects: ProjectMeta[] = [];
-    try {
-      const res = await fetch(`/api/projects`).then(r => r.json());
-      if (res.success) {
-        apiProjects = res.projects || [];
-      }
-    } catch(e) {
-      console.warn('API error, fallback to local', e);
-    }
-
-    try {
-      const stored = localStorage.getItem('infinite-canvas-projects');
-      if (stored) {
-        let parsed = JSON.parse(stored);
-        if (parsed && !Array.isArray(parsed) && (parsed.nodes || parsed.edges)) {
-          const migrationId = 'legacy-project';
-          const newProj = { id: migrationId, name: '旧版工作区', updatedAt: Date.now() };
-          localStorage.setItem(`infinite-canvas-project-${migrationId}`, stored);
-          parsed = [newProj];
-          localStorage.setItem('infinite-canvas-projects', JSON.stringify(parsed));
-          localStorage.removeItem('infinite-canvas-workspace');
-        }
-        if (Array.isArray(parsed)) {
-          // Merge API and local projects by ID, preferring local for this demo since backend is ephemeral
-          const allProjects = [...parsed];
-          for (const ap of apiProjects) {
-            if (!allProjects.find(p => p.id === ap.id)) {
-              allProjects.push(ap);
-            }
-          }
-          setProjects(allProjects.sort((a, b) => b.updatedAt - a.updatedAt));
-          return;
-        }
-      }
-      
-      // If we reach here, we didn't return from the stored projects block
-      if (apiProjects.length > 0) {
-        setProjects(apiProjects);
-        return;
-      }
-      
-      const oldStored = localStorage.getItem('infinite-canvas-workspace');
-      if (oldStored) {
-        const migrationId = 'legacy-project';
-        const newProj = { id: migrationId, name: '旧版工作区', updatedAt: Date.now() };
-        localStorage.setItem(`infinite-canvas-project-${migrationId}`, oldStored);
-        localStorage.setItem('infinite-canvas-projects', JSON.stringify([newProj]));
-        localStorage.removeItem('infinite-canvas-workspace');
-        setProjects([newProj]);
-      }
-    } catch(e) {
-      console.error('Failed to load projects', e);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
-
-  const handleCreateNew = async () => {
-    const newId = Date.now().toString();
-    const newName = '未命名项目 ' + new Date().toLocaleString();
-    const newProj: ProjectMeta = { id: newId, name: newName, updatedAt: Date.now() };
-    const updatedProjects = [newProj, ...projects];
-    
-    try {
-      await fetch(`/api/projects/${newId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, projectData: { nodes: [], edges: [] } })
-      });
-    } catch (err) {
-      console.warn('API sync err', err);
-    }
-    
-    setProjects(updatedProjects);
-    localStorage.setItem('infinite-canvas-projects', JSON.stringify(updatedProjects));
-    onSelectProject(newId, newName);
-  };
-
-  const handleProjectClick = (id: string, name: string) => {
-    onSelectProject(id, name);
-  };
-
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (confirm('确定要删除此项目吗？该操作不可恢复。')) {
-       try {
-         await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-       } catch(e) {}
-      const updated = projects.filter(p => p.id !== id);
-      setProjects(updated);
-      localStorage.setItem('infinite-canvas-projects', JSON.stringify(updated));
-      localStorage.removeItem(`infinite-canvas-project-${id}`);
-      import('idb-keyval').then(({ del }) => {
-        del(`infinite-canvas-project-${id}`).catch(err => console.warn(err));
-      });
-    }
-  };
-
-  return (
-    <div className="absolute inset-0 z-[1000] bg-[#0E0F11] flex flex-col items-center justify-center animate-in fade-in duration-300 overflow-hidden w-full h-full">
-      <div className="absolute top-6 right-6 z-[1010] flex items-center gap-3">
-        {renderTopRight}
-        {onClose && (
-          <button 
-            onClick={onClose}
-            className="p-3 bg-[#111214]/80 backdrop-blur-xl border border-zinc-800/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-2xl shadow-lg transition-all"
-          >
-            <X size={20} />
-          </button>
-        )}
-      </div>
-
-      <div className="relative z-10 bg-[#1C1C1E] border border-zinc-800 rounded-[24px] p-8 shadow-2xl w-[90%] max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between mb-8 shrink-0 flex-wrap gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight mb-2 flex items-center gap-3">
-              画布项目管理
-            </h1>
-            <p className="text-sm text-zinc-400">选择一个项目继续创作，或者新建一个项目。</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={handleCreateNew}
-              className="px-5 py-2.5 bg-[#00bcd4] hover:bg-[#00a6bb] text-black font-semibold rounded-xl text-sm transition-all hover:-translate-y-0.5 shadow-[0_4px_20px_rgba(0,188,212,0.3)] flex items-center gap-2"
-            >
-              <Plus size={18} /> 新建项目
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
-              {projects.length === 0 ? (
-                <div className="col-span-full h-full min-h-[200px] flex flex-col items-center justify-center text-zinc-500">
-                  <Sparkles size={40} className="mb-4 opacity-50" />
-                  <p>还没有任何项目，点击上方按钮新建一个吧！</p>
-                </div>
-              ) : (
-                projects.map(proj => (
-                  <div 
-                    key={proj.id}
-                    onClick={() => handleProjectClick(proj.id, proj.name)}
-                    className="group relative bg-[#2A2A2E] border border-zinc-700/50 hover:border-[#00bcd4]/50 hover:bg-[#2A2A2E]/80 rounded-2xl p-5 cursor-pointer transition-all duration-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[140px]"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between mb-3">
-                        <h3 className="font-semibold text-zinc-200 text-lg line-clamp-1 flex-1 group-hover:text-[#00bcd4] transition-colors">{proj.name}</h3>
-                        <button 
-                          className="h-8 w-8 rounded-lg hover:bg-rose-500/10 flex items-center justify-center text-zinc-500 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0 relative z-10" 
-                          onClick={(e) => handleDelete(e, proj.id)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-zinc-500">
-                      <RotateCw size={12} />
-                      更新于: {new Date(proj.updatedAt).toLocaleString()}
-                    </div>
                   </div>
-                ))
-              )}
-        </div>
-      </div>
+                </div>
+              </div>
+              
+              {/* Advance settings mock */}
+              <div className="border border-zinc-800 rounded-xl overflow-hidden mt-2">
+                <div className="bg-zinc-900/50 px-3 py-2 flex items-center justify-between cursor-pointer">
+                  <span className="text-sm text-zinc-400">高级参数</span>
+                  <div className="w-4 h-4 text-zinc-500">▼</div>
+                </div>
+              </div>
+           </div>
+           
+           {/* Footer Action */}
+           <div className="p-4 border-t border-zinc-800 shrink-0">
+             <button 
+                className="w-full bg-gradient-to-r from-[#00bcd4] to-[#0092a8] hover:from-[#00cbe6] hover:to-[#00a2bb] text-white font-medium py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-[#00bcd4]/20 transition-all active:scale-[0.98]"
+                onClick={() => {
+                   updateNodeData(activeRightPanel.nodeId, 'isGenerating', true);
+                   const targetNodeId = activeRightPanel.nodeId;
+                   setActiveRightPanel(null);
+                   setTimeout(() => {
+                      updateNodeData(targetNodeId, 'isGenerating', false);
+                      
+                      // Check if node exists and what its image url is, mock some thumbnails
+                      setNodes(nds => nds.map(n => {
+                        if (n.id === targetNodeId) {
+                           // Try to make up some variants based on the original structure or unsplash
+                           // For simulation, let's just use some unsplash ones, or just copy the current image to thumbnails
+                           const thumbs = n.data.thumbnails || [];
+                           const newThumb = `https://images.unsplash.com/photo-${Math.floor(1500000000000 + Math.random() * 100000000000)}?auto=format&fit=crop&q=80&w=400&h=400`;
+                           // we can use a small set of mock images
+                           const mockVariations = [
+                             'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&q=80&w=400&h=400',
+                             'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=400&h=400',
+                             'https://images.unsplash.com/photo-1557672172-298e090bd0f1?auto=format&fit=crop&q=80&w=400&h=400',
+                             'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&q=80&w=400&h=400'
+                           ];
+                           const randomThumb = mockVariations[Math.floor(Math.random() * mockVariations.length)];
+                           return {
+                             ...n,
+                             data: {
+                               ...n.data,
+                               imageUrl: randomThumb,
+                               thumbnails: [randomThumb, ...thumbs].slice(0, 4) // keep up to 4
+                             }
+                           };
+                        }
+                        return n;
+                      }));
+                      showToast('图生图生成完成');
+                   }, 3000);
+                }}
+             >
+               <Sparkles size={16} />
+               立即生成
+             </button>
+           </div>
+         </div>
+      )}
     </div>
   );
 }
 
-import { GroupSelectionOverlay } from './workspace/GroupSelectionOverlay';
-import { ModernProjectSelection } from './workspace/ModernProjectSelection';
-
-export default function InfiniteCanvasWrapper({ onClose, renderTopRight }: { onClose?: () => void, renderTopRight?: React.ReactNode }) {
-  const [selectedGroup, setSelectedGroup] = useState<{id: string, name: string} | null>(null);
-  const [selectedProject, setSelectedProject] = useState<{id: string, name: string} | null>(null);
-
-  if (!selectedGroup) {
-    return <GroupSelectionOverlay onSelectGroup={(id, name) => setSelectedGroup({id, name})} onClose={onClose} renderTopRight={renderTopRight} />;
-  }
-
-  if (!selectedProject) {
-    return <ModernProjectSelection 
-      groupId={selectedGroup.id}
-      groupName={selectedGroup.name}
-      onSelectProject={(id, name) => setSelectedProject({id, name})} 
-      onBackToGroups={() => setSelectedGroup(null)}
-      onClose={onClose} 
-      renderTopRight={renderTopRight} 
-    />;
-  }
-
-  return (
-    <div className="fixed inset-0 z-[200] bg-[#0E0F11] flex flex-col animate-in fade-in duration-300">
-      <div className="absolute top-6 right-6 z-[210] flex items-center gap-3">
-        {onClose && (
-          <button 
-            onClick={onClose}
-            className="p-3 bg-[#111214]/80 backdrop-blur-xl border border-zinc-800/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-2xl shadow-lg transition-all"
-          >
-            <X size={20} />
-          </button>
-        )}
-      </div>
-      <ReactFlowProvider>
-        <Canvas projectId={selectedProject.id} projectName={selectedProject.name} groupId={selectedGroup.id} groupName={selectedGroup.name} onBackToProjects={() => setSelectedProject(null)} />
-      </ReactFlowProvider>
-    </div>
-  );
-}

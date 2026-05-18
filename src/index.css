@@ -16,6 +16,40 @@
   stroke-linecap: round;
 }
 
+.react-flow__resize-control.line {
+  border-color: #00bcd4 !important;
+  opacity: 0;
+  transition: opacity 0.2s;
+  border-width: 4px !important;
+}
+
+.react-flow__node:hover .react-flow__resize-control.line,
+.react-flow__resize-control.line:hover,
+.react-flow__resize-control.line:active {
+  opacity: 0.5;
+}
+
+.react-flow__resize-control.handle {
+  display: block !important;
+  width: 14px !important;
+  height: 14px !important;
+  background-color: #00bcd4 !important;
+  border: 1px solid #111214 !important;
+  border-radius: 2px !important;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.react-flow__node:hover .react-flow__resize-control.handle,
+.react-flow__resize-control.handle:hover,
+.react-flow__resize-control.handle:active {
+  opacity: 1 !important;
+}
+
+.react-flow__resize-control.handle:hover {
+  transform: scale(1.2) !important;
+}
+
 .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
   font-weight: 600;
   color: #f4f4f5; /* zinc-100 */

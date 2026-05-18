@@ -30,69 +30,42 @@ export const ImageGenerator: React.FC<ImageGeneratorProps> = ({ onClose }) => {
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
 
-    // Check for API key if using preview models (Nano Banana)
-    if (isNanoBanana) {
-      const hasKey = await window.aistudio.hasSelectedApiKey();
-      if (!hasKey) {
-        setShowKeyPrompt(true);
-        return;
-      }
-    }
+    if (showKeyPrompt) setShowKeyPrompt(false);
 
     setIsGenerating(true);
     setError(null);
     setGeneratedImage(null);
 
     try {
-      const ai = getAIClient();
+      // Use pollinations.ai for free testing image generation instead of throwing Gemini model errors.
+      let width = 1024, height = 1024;
+      if (aspectRatio === '16:9') { width = 1920; height = 1080; }
+      else if (aspectRatio === '9:16') { width = 1080; height = 1920; }
+      else if (aspectRatio === '3:4') { width = 768; height = 1024; }
+      else if (aspectRatio === '4:3') { width = 1024; height = 768; }
+
+      const seed = Math.floor(Math.random() * 100000);
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&seed=${seed}&width=${width}&height=${height}`;
       
-      const config: any = {
-        imageConfig: {
-          aspectRatio: aspectRatio
-        }
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Image generation failed");
+      
+      const blob = await response.blob();
+      const reader = new FileReader();
+      
+      reader.onloadend = () => {
+        const base64data = reader.result as string;
+        setGeneratedImage(base64data);
+        setIsGenerating(false);
       };
+      reader.onerror = () => {
+        throw new Error("Blob reading failed");
+      };
+      reader.readAsDataURL(blob);
 
-      // Only Nano Banana models support imageSize
-      if (isNanoBanana) {
-        config.imageConfig.imageSize = imageSize;
-      }
-
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: {
-          parts: [
-            { text: prompt }
-          ]
-        },
-        config: config
-      });
-
-      let foundImage = false;
-      const candidates = response.candidates || [];
-      for (const candidate of candidates) {
-        for (const part of candidate.content?.parts || []) {
-          if (part.inlineData) {
-            const imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-            setGeneratedImage(imageUrl);
-            foundImage = true;
-            break;
-          }
-        }
-        if (foundImage) break;
-      }
-
-      if (!foundImage) {
-        setError('未能生成图片，请重试。可能是提示词触发了安全过滤。');
-      }
     } catch (err: any) {
       console.error('Image generation failed:', err);
-      if (err.message?.includes('Requested entity was not found')) {
-        setError('API Key 验证失败，请重新选择。');
-        setShowKeyPrompt(true);
-      } else {
-        setError(`生成失败: ${err.message || String(err)}`);
-      }
-    } finally {
+      setError(`生成失败: ${err.message || String(err)}`);
       setIsGenerating(false);
     }
   };
