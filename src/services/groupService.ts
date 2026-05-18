@@ -46,6 +46,20 @@ class GroupService {
     return Promise.resolve(groups[index]);
   }
 
+  async deleteGroup(groupId: string): Promise<boolean> {
+    let groups = db.getGroups();
+    const initialLength = groups.length;
+    groups = groups.filter(g => g.group_id !== groupId);
+    if (groups.length !== initialLength) {
+      db.saveGroups(groups);
+      // Optional: clean up members
+      const members = db.getMembers();
+      db.saveMembers(members.filter(m => m.group_id !== groupId));
+      return Promise.resolve(true);
+    }
+    return Promise.resolve(false);
+  }
+
   // Members
   async getGroupMembers(groupId: string): Promise<GroupMember[]> {
     const members = db.getMembers();

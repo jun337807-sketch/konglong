@@ -4,7 +4,8 @@ import { beatService } from '../../services/beatService';
 import { annotationService } from '../../services/annotationService';
 import { groupAssetService } from '../../services/groupAssetService';
 import { Episode, Beat, Annotation, SharedAsset } from '../../types/workspace';
-import { Plus, List, Search, Upload, ChevronLeft, MessageSquare, Paperclip, CheckCircle, Trash2 } from 'lucide-react';
+import { Plus, List, Search, Upload, ChevronLeft, MessageSquare, Paperclip, CheckCircle, Trash2, Download, FolderDown } from 'lucide-react';
+import JSZip from 'jszip';
 
 export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: string; groupId: string }) {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -122,19 +123,26 @@ export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: strin
       
       let isEpisodeFormat = false;
       let isBeatFormat = false;
+      let isHierarchicalBeatFormat = false;
+      
       const linesArr = text.split('\n');
       for (const l of linesArr) {
-         const tl = l.toLowerCase().trim();
-         if (tl.startsWith('beat') || tl.startsWith('[beat')) isBeatFormat = true;
-         if (tl.match(/^第.*集/)) isEpisodeFormat = true;
+         const tl = l.trim();
+         if (tl.toLowerCase().startsWith('beat') || tl.toLowerCase().startsWith('[beat')) isBeatFormat = true;
+         if (tl.match(/^\[Beat\s+\d+/i)) isHierarchicalBeatFormat = true;
+         if (tl.match(/^(?:#\s*)?第.*集/)) isEpisodeFormat = true;
       }
 
       let eps: { title: string, content: string }[] = [];
+      
       if (isEpisodeFormat) {
-          const epChunks = text.split(/(?=^第.*集)/m).filter(c => c.trim() !== '');
+          // Splitting by "# 第X集" or "第X集"
+          const epChunks = text.split(/(?=^\s*(?:#\s*)?第.*集)/m).filter(c => c.trim() !== '');
           for (const chunk of epChunks) {
               const lines = chunk.split('\n');
-              const title = lines[0].trim();
+              let title = lines[0].trim();
+              // Remove "# " if present
+              title = title.replace(/^#\s*/, '');
               const content = lines.slice(1).join('\n').trim();
               eps.push({ title, content: content || chunk });
           }
@@ -145,7 +153,10 @@ export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: strin
       let isFirstEp = true;
 
       for (const epData of eps) {
-          const ep = await scriptStoryboardService.createEpisode({ project_id: projectId, title: epData.title.substring(0, 50) });
+          const ep = await scriptStoryboardService.createEpisode({ 
+            project_id: projectId, 
+            title: epData.title.length > 50 ? epData.title.substring(0, 50) + '...' : epData.title 
+          });
           const epId = ep.episode_id;
           if (isFirstEp) {
               setSelectedEp(epId);
@@ -154,7 +165,11 @@ export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: strin
 
           let beatChunks: string[] = [];
           
-          if (isBeatFormat) {
+          if (isHierarchicalBeatFormat) {
+              // Split by [Beat X] and keep everything until the next [Beat X]
+              // Use regex that matches [Beat X ...] at the start of a line
+              beatChunks = epData.content.split(/(?=^\[Beat\s+\d+)/mi).filter(c => c.trim() !== '');
+          } else if (isBeatFormat) {
               beatChunks = epData.content.split(/(?=^(?:\[)?beat\b)/im).filter(c => c.trim() !== '');
           } else {
               beatChunks = epData.content.split(/\n\s*\n/).filter(c => c.trim() !== '');
@@ -167,12 +182,17 @@ export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: strin
           for (const bChunk of beatChunks) {
               if (!bChunk.trim()) continue;
               let rawTitle = bChunk.split('\n')[0].trim();
-              if (rawTitle.startsWith('[')) {
-                // If it's something like [Beat 1 | Title | Time]
+              
+              if (isHierarchicalBeatFormat && rawTitle.toLowerCase().startsWith('[beat')) {
+                  // Keep full [Beat 1 | Title | ...] as title
+                  rawTitle = rawTitle.trim();
+              } else if (rawTitle.startsWith('[')) {
+                // If it's something like [Beat 1 | Title | Time] but not the full hierarchical match
                 rawTitle = rawTitle.replace(/^\[/, '').replace(/\]$/, '').split('|').map(s=>s.trim()).filter(Boolean)[1] || rawTitle;
               }
-              let title = rawTitle.length > 30 ? rawTitle.substring(0, 30) + '...' : rawTitle;
-              if (!isBeatFormat) {
+
+              let title = rawTitle.length > 100 ? rawTitle.substring(0, 97) + '...' : rawTitle;
+              if (!isBeatFormat && !isHierarchicalBeatFormat) {
                  title = title || `Beat ${count}`;
               }
               
@@ -193,6 +213,57 @@ export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: strin
     }
     
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleExportProjectZip = async () => {
+    try {
+      const zip = new JSZip();
+      const projectFolder = zip.folder(`Project_${projectId}_Export`);
+      
+      for (const ep of episodes) {
+        // Sanitize folder name
+        const folderName = ep.title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 100);
+        const epFolder = projectFolder?.folder(folderName);
+        
+        const epBeats = await beatService.getBeatsByEpisode(ep.episode_id);
+        
+        // Add a master script for the episode
+        epFolder?.file('full_script.txt', ep.script_text || 'No script text');
+        
+        // Add individual beats as sub-folders
+        for (const beat of epBeats) {
+          const beatFolderName = beat.title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 100);
+          const beatFolder = epFolder?.folder(beatFolderName);
+          
+          // Inside beat folder, put the content
+          beatFolder?.file('script_text.txt', beat.script_text || '');
+          
+          // Plus some metadata if needed
+          const metadata = {
+            beat_id: beat.beat_id,
+            beat_number: beat.beat_number,
+            title: beat.title,
+            asset_count: beat.required_asset_ids?.length || 0,
+            annotation_count: beat.annotations?.length || 0
+          };
+          beatFolder?.file('metadata.json', JSON.stringify(metadata, null, 2));
+        }
+      }
+      
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Project_Export_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+    } catch (err) {
+      console.error('Failed to export ZIP', err);
+      alert('导出 ZIP 失败');
+    }
   };
   
   const handleAddAnnotation = async () => {
@@ -341,6 +412,13 @@ export function ScriptStoryboardPanel({ projectId, groupId }: { projectId: strin
            onClick={() => fileInputRef.current?.click()}
         >
           <Upload size={16} />
+        </button>
+        <button 
+           className="text-zinc-400 hover:text-[#00bcd4] tooltip relative transition-colors" 
+           title="打包导出分级目录 ZIP"
+           onClick={handleExportProjectZip}
+        >
+          <FolderDown size={16} />
         </button>
         <button className="text-zinc-400 hover:text-white transition-colors tooltip relative" title="新建分集" onClick={handleCreateEp}>
           <Plus size={16} />

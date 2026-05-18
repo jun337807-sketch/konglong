@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Project } from '../../types/workspace';
 import { projectService } from '../../services/projectService';
-import { Layers, Plus, ArrowLeft, X, Sparkles, Trash2, RotateCw, Edit2 } from 'lucide-react';
+import { Layers, Plus, ArrowLeft, X, Sparkles, Trash2, RotateCw, Edit2, Share2, Users } from 'lucide-react';
+import { groupService } from '../../services/groupService';
 
 export function ModernProjectSelection({ 
   groupId, 
@@ -9,7 +10,8 @@ export function ModernProjectSelection({
   onSelectProject, 
   onBackToGroups,
   onClose,
-  renderTopRight
+  renderTopRight,
+  currentUser
 }: { 
   groupId: string;
   groupName: string;
@@ -17,11 +19,17 @@ export function ModernProjectSelection({
   onBackToGroups: () => void;
   onClose?: () => void;
   renderTopRight?: React.ReactNode;
+  currentUser?: string;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>('');
+  
+  const [movingProjectId, setMovingProjectId] = useState<string | null>(null);
+  const [availableGroups, setAvailableGroups] = useState<any[]>([]);
+
+  const isPersonal = groupId.startsWith('personal_');
 
   useEffect(() => {
     loadProjects();
@@ -66,6 +74,20 @@ export function ModernProjectSelection({
     }
   };
 
+  const startMove = async (e: React.MouseEvent, projId: string) => {
+    e.stopPropagation();
+    const gs = await groupService.getGroups();
+    setAvailableGroups(gs);
+    setMovingProjectId(projId);
+  };
+
+  const executeMove = async (targetGroupId: string) => {
+    if (!movingProjectId) return;
+    await projectService.updateProject(movingProjectId, { group_id: targetGroupId });
+    setMovingProjectId(null);
+    loadProjects();
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-[#0E0F11] flex flex-col pt-16 animate-in fade-in">
       <div className="absolute top-4 left-4 z-[100]">
@@ -102,7 +124,7 @@ export function ModernProjectSelection({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-4">
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-4 auto-rows-max">
               {loading ? (
                 <div className="col-span-full h-full min-h-[200px] flex items-center justify-center text-zinc-500">加载中...</div>
               ) : projects.length === 0 ? (
@@ -141,15 +163,62 @@ export function ModernProjectSelection({
                       </div>
                       <p className="text-sm text-zinc-400">Type: {proj.project_type}</p>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-zinc-500 mt-4">
-                      <RotateCw size={12} />
-                      更新于: {new Date(proj.updated_at).toLocaleString()}
+                    <div className="flex items-center justify-between text-xs text-zinc-500 mt-4 relative z-10">
+                      <div className="flex items-center gap-2">
+                        <RotateCw size={12} />
+                        更新于: {new Date(proj.updated_at).toLocaleString()}
+                      </div>
+                      {isPersonal && (
+                        <button 
+                          onClick={(e) => startMove(e, proj.project_id)}
+                          className="opacity-0 group-hover:opacity-100 flex items-center gap-1.5 px-2 py-1 bg-[#00bcd4]/10 hover:bg-[#00bcd4]/20 text-[#00bcd4] rounded transition-all"
+                        >
+                          <Share2 size={12} />
+                          移至小组
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
               )}
         </div>
       </div>
+
+      {movingProjectId && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center backdrop-blur-sm" onClick={() => setMovingProjectId(null)}>
+          <div className="bg-[#1A1A1A] border border-zinc-700 rounded-2xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+              <Users size={20} className="text-[#00bcd4]" /> 移至小组工作区
+            </h3>
+            <p className="text-zinc-400 mb-6 text-sm">
+              选择一个小组将该项目移动过去。移动后，小组内的所有成员都可以参与该项目。
+            </p>
+            <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar mb-6">
+              {availableGroups.length === 0 ? (
+                <div className="text-zinc-500 text-sm text-center py-4">暂无可用小组，请先去创建一个小组工作区</div>
+              ) : (
+                availableGroups.map(g => (
+                  <button 
+                    key={g.group_id}
+                    onClick={() => executeMove(g.group_id)}
+                    className="flex justify-between items-center p-3 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-[#00bcd4]/50 transition-all text-left"
+                  >
+                    <span className="text-white font-medium">{g.group_name}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="flex justify-end mt-2">
+              <button 
+                onClick={() => setMovingProjectId(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700 transition-all"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

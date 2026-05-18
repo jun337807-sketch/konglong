@@ -1,21 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, X, Sparkles, FolderKanban, Edit2 } from 'lucide-react';
+import { Users, Plus, X, Sparkles, FolderKanban, Edit2, Trash2, User as UserIcon } from 'lucide-react';
 import { groupService } from '../../services/groupService';
 import { Group } from '../../types/workspace';
 
 export function GroupSelectionOverlay({ 
   onSelectGroup, 
   onClose, 
-  renderTopRight 
+  renderTopRight,
+  currentUser
 }: { 
   onSelectGroup: (id: string, name: string) => void;
   onClose?: () => void;
   renderTopRight?: React.ReactNode;
+  currentUser?: string;
 }) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>('');
+  const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
 
   useEffect(() => {
     loadGroups();
@@ -35,11 +38,20 @@ export function GroupSelectionOverlay({
     onSelectGroup(newGroup.group_id, newGroup.group_name);
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteClick = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!window.confirm('确定要删除这个小组吗？这可能会导致小组内的所有数据丢失。')) return;
-    // For now we don't implement full cascade delete in mock
-    onSelectGroup('', ''); // trigger re-render? No
+    setGroupToDelete(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!groupToDelete) return;
+    await groupService.deleteGroup(groupToDelete);
+    setGroupToDelete(null);
+    await loadGroups();
+  };
+
+  const cancelDelete = () => {
+    setGroupToDelete(null);
   };
 
   const startEdit = (e: React.MouseEvent, group: Group) => {
@@ -79,29 +91,56 @@ export function GroupSelectionOverlay({
       </div>
 
       <div className="max-w-7xl w-full mx-auto px-8 py-8 flex flex-col h-full">
-        <div className="flex items-center justify-between mb-12">
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-              <Users className="text-[#00bcd4]" /> 小组工作区
-            </h1>
-            <p className="text-sm text-zinc-400">选择或创建一个小组，在小组内共享资源和项目。</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={handleCreateNew}
-              className="px-5 py-2.5 bg-[#00bcd4] hover:bg-[#00a6bb] text-black font-semibold rounded-xl text-sm transition-all hover:-translate-y-0.5 shadow-[0_4px_20px_rgba(0,188,212,0.3)] flex items-center gap-2"
-            >
-              <Plus size={18} /> 新建小组
-            </button>
-          </div>
-        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4">
+          
+          {/* 个人工作区 */}
+          {currentUser && (
+            <div className="mb-10">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <UserIcon className="text-blue-400" /> 个人工作区
+              </h2>
+              <div 
+                onClick={() => onSelectGroup(`personal_${currentUser}`, '个人工作区')}
+                className="group relative bg-[#1A1A1A] border border-zinc-700/50 hover:border-blue-400/50 hover:bg-[#222] rounded-2xl p-6 cursor-pointer transition-all duration-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[160px] max-w-sm"
+              >
+                <div>
+                  <div className="flex items-start justify-between mb-3">
+                    <h3 className="font-semibold text-zinc-200 text-lg line-clamp-1 flex-1 group-hover:text-blue-400 transition-colors flex items-center gap-2">
+                      个人项目
+                    </h3>
+                  </div>
+                  <p className="text-sm text-zinc-500 line-clamp-2">只有您可以访问这个工作区的项目。</p>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-zinc-500 mt-4">
+                  <FolderKanban size={14} />
+                  <span className="flex-1">进入个人工作区</span>
+                </div>
+              </div>
+            </div>
+          )}
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-4">
+          {/* 小组工作区 */}
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Users className="text-[#00bcd4]" /> 小组工作区
+              </h2>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={handleCreateNew}
+                  className="px-4 py-2 bg-[#00bcd4] hover:bg-[#00a6bb] text-black font-semibold rounded-xl text-sm transition-all shadow-[0_4px_20px_rgba(0,188,212,0.3)] flex items-center gap-2"
+                >
+                  <Plus size={16} /> 新建小组
+                </button>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-max">
               {loading ? (
-                <div className="col-span-full h-full min-h-[200px] flex items-center justify-center text-zinc-500">加载中...</div>
+                <div className="col-span-full h-full min-h-[160px] flex items-center justify-center text-zinc-500">加载中...</div>
               ) : groups.length === 0 ? (
-                <div className="col-span-full h-full min-h-[200px] flex flex-col items-center justify-center text-zinc-500">
-                  <Sparkles size={40} className="mb-4 opacity-50" />
+                <div className="col-span-full h-full min-h-[160px] flex flex-col items-center justify-center text-zinc-500 border border-dashed border-zinc-700/50 rounded-2xl">
+                  <Sparkles size={32} className="mb-4 opacity-50" />
                   <p>还没有任何小组，点击上方按钮新建一个吧！</p>
                 </div>
               ) : (
@@ -132,6 +171,13 @@ export function GroupSelectionOverlay({
                              </button>
                            </h3>
                         )}
+                        <button 
+                          onClick={(e) => handleDeleteClick(e, group.group_id)} 
+                          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 rounded-md text-zinc-500 hover:text-red-500 transition-all ml-2 flex-shrink-0"
+                          title="删除小组"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                       <p className="text-sm text-zinc-500 line-clamp-2">{group.description || '无描述'}</p>
                     </div>
@@ -142,8 +188,35 @@ export function GroupSelectionOverlay({
                   </div>
                 ))
               )}
+            </div>
+          </div>
         </div>
       </div>
+
+      {groupToDelete && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center backdrop-blur-sm" onClick={cancelDelete}>
+          <div className="bg-[#1A1A1A] border border-zinc-700 rounded-2xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-2">确认删除小组？</h3>
+            <p className="text-zinc-400 mb-6 text-sm">
+              此操作将永久删除该小组。这可能会导致小组内的所有数据丢失。您确定要继续吗？
+            </p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={cancelDelete}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-all"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmDelete}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all shadow-lg"
+              >
+                确定删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

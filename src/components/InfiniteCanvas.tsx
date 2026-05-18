@@ -63,7 +63,7 @@ const selectedBorder = "border-[rgba(255,255,255,0.15)] shadow-[0_0_20px_rgba(25
 const defaultBorder = "border-zinc-800/80";
 const nodeBg = "bg-[#111214]/90 backdrop-blur-md";
 const handleStyle = "!w-5 !h-5 !min-w-[20px] !min-h-[20px] !absolute !top-1/2 !-translate-y-1/2 !bg-transparent !border-transparent hover:!bg-[#00bcd4] hover:!border-[#00bcd4] hover:!scale-125 hover:shadow-[0_0_12px_rgba(0,188,212,0.8)] transition-all duration-200 cursor-crosshair z-50 rounded-full";
-const resizerHandleStyle = "";
+const resizerHandleStyle = "w-2 h-2 bg-white/50 rounded-sm border-none shadow-[0_0_4px_rgba(255,255,255,0.3)]";
 
 // Custom Node Components
 const TextNode = ({ data, id, selected }: any) => {
@@ -82,7 +82,7 @@ const TextNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={240} minHeight={150} isVisible={selected} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={240} minHeight={150} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[240px] w-full h-full flex flex-col group relative`} onClick={() => setShowReviewMenu(false)}>
         {data.isGenerating && (
           <div className="absolute inset-0 bg-[#1A1A1A]/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center gap-3 z-50">
@@ -277,6 +277,8 @@ const ImageNode = ({ data, id, selected }: any) => {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isPanoramaOpen, setIsPanoramaOpen] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState(data.title || '图片节点');
   const panoramaRef = useRef<CleanPanoramaRef>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -299,6 +301,8 @@ const ImageNode = ({ data, id, selected }: any) => {
   const [showFormatMenu, setShowFormatMenu] = useState(false);
   const [resolution, setResolution] = useState('2K');
   const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [model, setModel] = useState('KONGLONG Image');
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const [imageCount, setImageCount] = useState(1);
   const [showCountMenu, setShowCountMenu] = useState(false);
   
@@ -320,6 +324,7 @@ const ImageNode = ({ data, id, selected }: any) => {
       setShowCountMenu(false);
       setShowStyleMenu(false);
       setShowAddMenu(false);
+      setShowModelMenu(false);
     };
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
@@ -398,12 +403,40 @@ const ImageNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={240} minHeight={100} isVisible={selected} keepAspectRatio={!!data.imageUrl} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={240} minHeight={100} isVisible={selected} keepAspectRatio={!!data.imageUrl} />
       
       {/* Node Label (Above Node) */}
-      <div className={`absolute -top-7 left-0 text-zinc-400 text-xs flex items-center gap-1.5 font-medium px-1 transition-opacity ${selected ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`absolute -top-7 left-0 text-zinc-400 text-xs flex items-center gap-1.5 font-medium px-1 transition-opacity opacity-100 z-50`}>
         <ImageIcon size={14} />
-        {data.title || '图片节点'}
+        {isEditingTitle ? (
+          <input 
+            autoFocus
+            value={tempTitle}
+            onChange={(e) => setTempTitle(e.target.value)}
+            onBlur={() => {
+              setIsEditingTitle(false);
+              updateNodeData(id, { title: tempTitle });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setIsEditingTitle(false);
+                updateNodeData(id, { title: tempTitle });
+              }
+            }}
+            className="bg-transparent border-b border-zinc-500 outline-none text-white w-24 px-1"
+          />
+        ) : (
+          <span 
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setTempTitle(data.title || '图片节点');
+              setIsEditingTitle(true);
+            }} 
+            className="cursor-text hover:text-zinc-200"
+          >
+            {data.title || '图片节点'}
+          </span>
+        )}
       </div>
       
       <NodeToolbar
@@ -664,10 +697,10 @@ const ImageNode = ({ data, id, selected }: any) => {
             setShowCountMenu(false);
           }}
         >
-           {/* Top tools & Reference Images */}
-           <div className="flex items-center gap-2">
+           {/* Reference Images */}
+           <div className="flex items-center gap-2 mb-2">
              {referenceImages.length > 0 && (
-               <div className="ml-auto pl-4 border-zinc-700 flex items-center gap-2">
+               <div className="border-zinc-700 flex items-center gap-2">
                  {referenceImages.map((refNode: any, i: number) => (
                    <div key={refNode.id} className="relative w-8 h-8 rounded-md overflow-hidden border border-zinc-600 shadow-sm">
                      <img src={refNode.data.imageUrl || undefined} className="w-full h-full object-cover" />
@@ -725,12 +758,35 @@ const ImageNode = ({ data, id, selected }: any) => {
              </div>
            </div>
 
-           {/* Bottom Bar */}
+           {/* Bottom Bar (Settings & Generate) */}
            <div className="flex items-center justify-between border-t border-zinc-700/50 pt-3 flex-nowrap">
+             {/* Left Settings */}
              <div className="flex items-center gap-2 shrink-0">
-               <button className="flex items-center gap-1 text-xs text-zinc-300 hover:text-white transition-colors">
-                 <X size={14} className="text-zinc-400" /> Pollinations API <ChevronDown size={12} />
-               </button>
+               <div className="relative">
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); setShowModelMenu(!showModelMenu); }}
+                   className={`flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-md whitespace-nowrap shrink-0 ${showModelMenu ? 'bg-zinc-800 text-white' : 'text-zinc-300 hover:text-white hover:bg-zinc-800/50'}`}
+                 >
+                   <Box size={14} className={showModelMenu ? 'text-[#00bcd4]' : 'text-zinc-400'} /> {model} <ChevronDown size={12} className={`transition-transform ${showModelMenu ? 'rotate-180' : ''}`} />
+                 </button>
+                 
+                 {showModelMenu && (
+                   <div 
+                     className="absolute bottom-[calc(100%+8px)] left-0 w-[200px] bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] py-2 z-50 flex flex-col"
+                     onClick={(e) => e.stopPropagation()}
+                   >
+                     {['KONGLONG Image', 'KONGLONG Banana 2', 'KONGLONG Banana pro'].map(m => (
+                       <button
+                         key={m}
+                         onClick={(e) => { e.stopPropagation(); setModel(m); setShowModelMenu(false); }}
+                         className={`flex items-center gap-2 px-4 py-2 text-xs transition-colors text-left ${model === m ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300'}`}
+                       >
+                         {m}
+                       </button>
+                     ))}
+                   </div>
+                 )}
+               </div>
                <div className="relative">
                  <button 
                    onClick={(e) => { e.stopPropagation(); setShowFormatMenu(!showFormatMenu); }}
@@ -741,7 +797,7 @@ const ImageNode = ({ data, id, selected }: any) => {
                  
                  {showFormatMenu && (
                    <div 
-                     className="absolute top-[calc(100%+8px)] left-0 w-[340px] bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-50 flex flex-col gap-4"
+                     className="absolute bottom-[calc(100%+8px)] left-0 w-[340px] bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-50 flex flex-col gap-4"
                      onClick={(e) => e.stopPropagation()}
                    >
                      {/* 分辨率 */}
@@ -749,7 +805,7 @@ const ImageNode = ({ data, id, selected }: any) => {
                        <div className="text-xs text-zinc-500 mb-2 font-medium">分辨率</div>
                        <div className="grid grid-cols-3 gap-2">
                          {['1K', '2K', '4K'].map(res => {
-                           const isUnsupported = res === '4K';
+                           const isUnsupported = false;
                            return (
                              <button 
                                key={res}
@@ -826,6 +882,7 @@ const ImageNode = ({ data, id, selected }: any) => {
                
              </div>
 
+             {/* Right Settings */}
              <div className="flex items-center gap-2 shrink-0">
                <button 
                  className="text-zinc-400 hover:text-white" 
@@ -846,7 +903,7 @@ const ImageNode = ({ data, id, selected }: any) => {
                    {imageCount}张 <ChevronDown size={12} className={`transition-transform ${showCountMenu ? 'rotate-180' : ''}`} />
                  </button>
                  {showCountMenu && (
-                   <div className="absolute bottom-full right-0 mb-2 w-20 bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-2xl py-2 flex flex-col z-50">
+                   <div className="absolute bottom-[calc(100%+8px)] right-0 w-20 bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-2xl py-2 flex flex-col z-50">
                      {[1, 2, 4].map(num => (
                        <button
                          key={num}
@@ -916,6 +973,82 @@ const ImageNode = ({ data, id, selected }: any) => {
   );
 };
 
+const CAMERA_MOVEMENTS = [
+  { name: '固定镜头', text: 'Static shot', baseClass: '', hoverClass: '' },
+  { name: '跟随拍摄', text: 'Tracking shot', baseClass: 'scale-110', hoverClass: 'group-hover:scale-125 group-hover:-translate-y-2' },
+  { name: '盘旋抬升', text: 'Spiraling up', baseClass: 'scale-110', hoverClass: 'group-hover:scale-125 group-hover:-translate-y-2 group-hover:rotate-3' },
+  { name: '盘旋下降', text: 'Spiraling down', baseClass: 'scale-110', hoverClass: 'group-hover:scale-125 group-hover:translate-y-2 group-hover:-rotate-3' },
+  { name: '镜头上摇', text: 'Pan up', baseClass: 'scale-110 -translate-y-2', hoverClass: 'group-hover:translate-y-2' },
+  { name: '镜头下摇', text: 'Pan down', baseClass: 'scale-110 translate-y-2', hoverClass: 'group-hover:-translate-y-2' },
+  { name: '镜头左摇', text: 'Pan left', baseClass: 'scale-110 -translate-x-2', hoverClass: 'group-hover:translate-x-2' },
+  { name: '镜头右摇', text: 'Pan right', baseClass: 'scale-110 translate-x-2', hoverClass: 'group-hover:-translate-x-2' },
+  { name: '镜头上升', text: 'Lift up', baseClass: 'scale-125 translate-y-4', hoverClass: 'group-hover:-translate-y-4' },
+  { name: '镜头下降', text: 'Lift down', baseClass: 'scale-125 -translate-y-4', hoverClass: 'group-hover:translate-y-4' },
+  { name: '镜头左移', text: 'Move left', baseClass: 'scale-125 translate-x-4', hoverClass: 'group-hover:-translate-x-4' },
+  { name: '镜头右移', text: 'Move right', baseClass: 'scale-125 -translate-x-4', hoverClass: 'group-hover:translate-x-4' },
+  { name: '镜头前推', text: 'Zoom in', baseClass: 'scale-100', hoverClass: 'group-hover:scale-125' },
+  { name: '镜头后移', text: 'Zoom out', baseClass: 'scale-125', hoverClass: 'group-hover:scale-100' },
+  { name: '变焦推进', text: 'Dolly in', baseClass: 'scale-100', hoverClass: 'group-hover:scale-125 group-hover:-translate-y-1' },
+  { name: '变焦拉远', text: 'Dolly out', baseClass: 'scale-125 -translate-y-1', hoverClass: 'group-hover:scale-100 group-hover:translate-y-0' },
+  { name: '柯克变焦', text: 'Vertigo effect', baseClass: 'scale-110', hoverClass: 'group-hover:scale-150 group-hover:-rotate-[1deg]' },
+  { name: '环绕拍摄', text: 'Orbit', baseClass: 'scale-125 translate-x-2', hoverClass: 'group-hover:-translate-x-2 group-hover:rotate-[3deg]' },
+  { name: '滚筒旋转', text: 'Barrel roll', baseClass: 'scale-110', hoverClass: 'group-hover:scale-[1.15] group-hover:rotate-[10deg]' },
+  { name: '第一视角', text: 'POV', baseClass: 'scale-110', hoverClass: 'group-hover:scale-125 group-hover:translate-y-[2px] group-hover:translate-x-[2px]' },
+  { name: '无人机', text: 'Drone', baseClass: 'scale-125 translate-y-2', hoverClass: 'group-hover:scale-100 group-hover:translate-y-0' },
+  { name: '高空航拍', text: 'Aerial view', baseClass: 'scale-125', hoverClass: 'group-hover:scale-100' },
+  { name: '手持拍摄', text: 'Handheld', baseClass: 'scale-110', hoverClass: 'group-hover:rotate-[1deg] group-hover:-translate-x-[2px] group-hover:translate-y-[2px]' }
+];
+
+const CameraMovementItem = ({ cam, prompt, setPrompt, updateNodeData, id, data, setShowCameraMenu }: any) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  
+  return (
+    <button 
+        onClick={(e) => {
+            e.stopPropagation();
+            const newPrompt = prompt ? `${prompt}, ${cam.text}` : cam.text;
+            setPrompt(newPrompt);
+            updateNodeData(id, { ...data, prompt: newPrompt });
+            setShowCameraMenu(false);
+        }}
+        onMouseEnter={() => {
+            if (videoRef.current) {
+                videoRef.current.currentTime = 0;
+                videoRef.current.play().catch(() => {});
+            }
+        }}
+        onMouseLeave={() => {
+            if (videoRef.current) {
+                videoRef.current.pause();
+                videoRef.current.currentTime = 0;
+            }
+        }}
+        className="group flex flex-col gap-2 rounded-lg transition-colors hover:bg-zinc-800 p-1.5 -mx-1.5"
+    >
+        <div className="w-full aspect-video rounded-lg overflow-hidden border border-zinc-700/50 group-hover:border-[#00bcd4]/50 relative bg-zinc-900 pointer-events-none">
+            <img 
+              src={`https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=400&q=80`}
+              alt={cam.name}
+              referrerPolicy="no-referrer"
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${cam.baseClass} group-hover:opacity-0`}
+            />
+            <video 
+                ref={videoRef}
+                src="https://media.w3.org/2010/05/sintel/trailer.mp4"
+                muted
+                loop
+                playsInline
+                crossOrigin="anonymous"
+                className={`absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-all duration-[3000ms] ease-out ${cam.baseClass} ${cam.hoverClass}`}
+            />
+        </div>
+        <div className="text-[11px] text-zinc-300 group-hover:text-white pb-1 text-center font-medium">
+            {cam.name}
+        </div>
+    </button>
+  );
+};
+
 const VideoNode = ({ data, id, selected }: any) => {
   const { updateNodeData, getNodes, getEdges, setNodes } = useReactFlow();
   const [prompt, setPrompt] = useState(data.prompt || "");
@@ -926,9 +1059,14 @@ const VideoNode = ({ data, id, selected }: any) => {
 
   const [aspectRatio, setAspectRatio] = useState(data.aspectRatio || '16:9');
   const [resolution, setResolution] = useState(data.resolution || '720P');
-  const [duration, setDuration] = useState(data.duration || 5);
-  const [audioEnabled, setAudioEnabled] = useState(data.audioEnabled || false);
+  const [duration, setDuration] = useState(data.duration || 15);
+  const [audioEnabled, setAudioEnabled] = useState(data.audioEnabled !== undefined ? data.audioEnabled : true);
+  const [videoModel, setVideoModel] = useState(data.videoModel || 'Seedance 2.0 VIP');
+  const [showVideoModelMenu, setShowVideoModelMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCameraMenu, setShowCameraMenu] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState(data.title || '视频节点');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -943,7 +1081,11 @@ const VideoNode = ({ data, id, selected }: any) => {
   }, [id, setNodes, getNodes]);
 
   React.useEffect(() => {
-    const handleClickOutside = () => setShowSettings(false);
+    const handleClickOutside = () => {
+      setShowSettings(false);
+      setShowCameraMenu(false);
+      setShowVideoModelMenu(false);
+    };
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
@@ -991,12 +1133,40 @@ const VideoNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={240} minHeight={100} isVisible={selected} keepAspectRatio={!!data.videoUrl} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={240} minHeight={100} isVisible={selected} keepAspectRatio={!!data.videoUrl} />
       
       {/* Node Label (Above Node) */}
-      <div className={`absolute -top-7 left-0 text-zinc-400 text-xs flex items-center gap-1.5 font-medium px-1 transition-opacity ${selected ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`absolute -top-7 left-0 text-zinc-400 text-xs flex items-center gap-1.5 font-medium px-1 transition-opacity opacity-100 z-50`}>
         <Film size={14} />
-        {data.title || '视频节点'}
+        {isEditingTitle ? (
+          <input 
+            autoFocus
+            value={tempTitle}
+            onChange={(e) => setTempTitle(e.target.value)}
+            onBlur={() => {
+              setIsEditingTitle(false);
+              updateNodeData(id, { title: tempTitle });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setIsEditingTitle(false);
+                updateNodeData(id, { title: tempTitle });
+              }
+            }}
+            className="bg-transparent border-b border-zinc-500 outline-none text-white w-24 px-1"
+          />
+        ) : (
+          <span 
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setTempTitle(data.title || '视频节点');
+              setIsEditingTitle(true);
+            }} 
+            className="cursor-text hover:text-zinc-200"
+          >
+            {data.title || '视频节点'}
+          </span>
+        )}
       </div>
 
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-0 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow w-full h-full flex flex-col relative pointer-events-auto`}>
@@ -1071,18 +1241,45 @@ const VideoNode = ({ data, id, selected }: any) => {
                          </button>
                      ))}
                  </div>
-                 <button className="text-zinc-500 hover:text-white p-1 transition-colors" title="展开">
-                     <Maximize size={14} />
-                 </button>
              </div>
              
              {/* Tools Row */}
              <div className="flex gap-3 mb-4">
-                 <button className="flex flex-col items-center justify-center gap-1.5 w-14 h-14 bg-zinc-800/80 border border-zinc-700/80 rounded-[14px] hover:bg-zinc-700 hover:border-zinc-600 transition-colors text-zinc-400 hover:text-zinc-200">
-                     <Camera size={16} strokeWidth={1.5} />
-                     <span className="text-[10px] font-medium">运镜</span>
-                 </button>
-                 <button className="flex flex-col items-center justify-center gap-1.5 w-14 h-14 bg-zinc-800/80 border border-zinc-700/80 rounded-[14px] hover:bg-zinc-700 hover:border-zinc-600 transition-colors text-zinc-400 hover:text-zinc-200">
+                 <div className="relative">
+                     <button 
+                         onClick={(e) => { e.stopPropagation(); setShowCameraMenu(!showCameraMenu); setShowSettings(false); }}
+                         className={`flex flex-col items-center justify-center gap-1.5 w-14 h-14 border rounded-[14px] transition-colors ${showCameraMenu ? 'bg-zinc-700 border-zinc-500 text-white' : 'bg-zinc-800/80 border-zinc-700/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 hover:border-zinc-600'}`}
+                     >
+                         <Camera size={16} strokeWidth={1.5} />
+                         <span className="text-[10px] font-medium">运镜</span>
+                     </button>
+                     
+                     {showCameraMenu && (
+                         <div 
+                             className="absolute bottom-[calc(100%+8px)] left-0 w-[560px] max-h-[380px] overflow-y-auto custom-scrollbar bg-[#2A2A2A] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-[100]" 
+                             onClick={(e) => e.stopPropagation()}
+                         >
+                             <div className="grid grid-cols-4 gap-3">
+                                 {CAMERA_MOVEMENTS.map(cam => (
+                                    <CameraMovementItem 
+                                        key={cam.name} 
+                                        cam={cam} 
+                                        prompt={prompt} 
+                                        setPrompt={setPrompt} 
+                                        updateNodeData={updateNodeData} 
+                                        id={id} 
+                                        data={data} 
+                                        setShowCameraMenu={setShowCameraMenu} 
+                                    />
+                                ))}
+                             </div>
+                         </div>
+                     )}
+                 </div>
+                 <button 
+                   onClick={() => data.onOpenAssets?.('entities')}
+                   className="flex flex-col items-center justify-center gap-1.5 w-14 h-14 bg-zinc-800/80 border border-zinc-700/80 rounded-[14px] hover:bg-zinc-700 hover:border-zinc-600 transition-colors text-zinc-400 hover:text-zinc-200"
+                 >
                      <User size={16} strokeWidth={1.5} />
                      <span className="text-[10px] font-medium">角色库</span>
                  </button>
@@ -1137,15 +1334,42 @@ const VideoNode = ({ data, id, selected }: any) => {
             {/* Bottom Controls Row */}
             <div className="flex items-center justify-between pt-3">
                 <div className="flex items-center gap-4">
-                    <button className="flex items-center gap-2 text-xs text-zinc-300 hover:text-white transition-colors">
-                        <span className="w-1 h-3 bg-[#FFC107] rounded-sm shadow-[0_0_8px_rgba(255,193,7,0.8)]"></span>
-                        <span className="font-bold flex items-center gap-1 tracking-wide">
-                            Seedance 2.0 VIP <ChevronDown size={14} className="text-zinc-500 ml-0.5" />
-                        </span>
-                    </button>
                     <div className="relative">
                         <button 
-                            onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }}
+                            onClick={(e) => { e.stopPropagation(); setShowVideoModelMenu(!showVideoModelMenu); setShowSettings(false); }}
+                            className="flex items-center gap-2 text-xs text-zinc-300 hover:text-white transition-colors"
+                        >
+                            <span className="w-1 h-3 bg-[#FFC107] rounded-sm shadow-[0_0_8px_rgba(255,193,7,0.8)]"></span>
+                            <span className="font-bold flex items-center gap-1 tracking-wide">
+                                {videoModel} <ChevronDown size={14} className="text-zinc-500 ml-0.5" />
+                            </span>
+                        </button>
+                        
+                        {showVideoModelMenu && (
+                            <div 
+                                className="absolute bottom-[calc(100%+8px)] left-0 w-[200px] bg-[#1E1E1E] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] py-2 z-50 flex flex-col"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                {['Seedance 2.0 VIP', 'Seedance 2.0 Fast VIP'].map(m => (
+                                    <button
+                                        key={m}
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setVideoModel(m); 
+                                            updateNodeData(id, { videoModel: m });
+                                            setShowVideoModelMenu(false); 
+                                        }}
+                                        className={`flex items-center gap-2 px-4 py-2 text-xs transition-colors text-left ${videoModel === m ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300'}`}
+                                    >
+                                        {m}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    <div className="relative">
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); setShowVideoModelMenu(false); }}
                             className={`flex items-center gap-1.5 text-xs border px-2 py-1 rounded transition-colors ${showSettings ? 'border-zinc-500 text-white bg-zinc-800' : 'border-transparent text-zinc-300 hover:text-white hover:border-zinc-700'}`}
                         >
                             <Monitor size={14} />
@@ -1157,7 +1381,7 @@ const VideoNode = ({ data, id, selected }: any) => {
 
                         {/* Settings Popover */}
                         {showSettings && (
-                            <div className="absolute top-[calc(100%+8px)] left-0 w-[300px] bg-[#2A2A2A] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-[100] flex flex-col gap-5 text-sm" onClick={(e) => e.stopPropagation()}>
+                            <div className="absolute bottom-[calc(100%+8px)] left-0 w-[300px] bg-[#2A2A2A] border border-zinc-700/80 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 z-[100] flex flex-col gap-5 text-sm" onClick={(e) => e.stopPropagation()}>
                                 {/* 比例 */}
                                 <div>
                                     <div className="text-zinc-400 mb-2.5 text-xs font-medium">比例</div>
@@ -1321,7 +1545,7 @@ const ResultNode = ({ data, id, selected }: any) => {
 const AudioNode = ({ data, id, selected }: any) => {
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={280} minHeight={120} isVisible={selected} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={280} minHeight={120} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-2 shadow-sm hover:shadow-md transition-shadow min-w-[280px] w-full h-full flex flex-col`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center gap-2 px-2 py-2 text-zinc-400">
@@ -1375,7 +1599,7 @@ const ScriptNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={440} minHeight={350} isVisible={selected} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={440} minHeight={350} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow min-w-[440px] w-full h-full flex flex-col relative`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center justify-between mb-3 text-zinc-400 pb-2 border-b border-zinc-800/50 shrink-0">
@@ -1598,7 +1822,7 @@ const AssetGroupNode = ({ data, id, selected }: any) => {
   
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={380} minHeight={200} isVisible={selected} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={380} minHeight={200} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow min-w-[380px] w-full h-full flex flex-col relative`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-800/50">
@@ -1717,7 +1941,7 @@ const ReviewResultNode = ({ data, id, selected }: any) => {
 
   return (
     <>
-      <NodeResizer color="rgba(255,255,255,0.4)" handleClassName={resizerHandleStyle} minWidth={450} minHeight={450} isVisible={selected} />
+      <NodeResizer color="transparent" handleClassName={resizerHandleStyle} minWidth={450} minHeight={450} isVisible={selected} />
       <div className={`${nodeBg} border-[1.5px] ${selected ? selectedBorder : defaultBorder} rounded-2xl p-0 shadow-sm hover:shadow-[0_0_15px_rgba(0,188,212,0.15)] transition-shadow min-w-[450px] w-full h-full flex flex-col relative overflow-hidden`}>
         <Handle type="target" position={Position.Left} className={handleStyle} />
         
@@ -1833,11 +2057,26 @@ const AnimatedEdge = ({
     targetY,
   });
 
+  // Remove any inherited filter that might cause cyan outlines
+  const baseStyle = { ...style };
+  delete baseStyle.filter;
+  delete baseStyle.stroke;
+
   return (
     <g 
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
+      <defs>
+        <linearGradient id={`${id}-gradient`} x1="0%" y1="0%" x2="200%" y2="0%">
+          <stop offset="0%" stopColor="rgba(255, 255, 255, 0.1)" />
+          <stop offset="25%" stopColor="#ffffff" />
+          <stop offset="50%" stopColor="rgba(255, 255, 255, 0.1)" />
+          <stop offset="75%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="rgba(255, 255, 255, 0.1)" />
+          <animateTransform attributeName="gradientTransform" type="translate" from="-1 0" to="0 0" dur="2s" repeatCount="indefinite" />
+        </linearGradient>
+      </defs>
       <path
         d={edgePath}
         fill="none"
@@ -1845,8 +2084,10 @@ const AnimatedEdge = ({
         strokeWidth={20}
         className="react-flow__edge-interaction"
       />
-      <BaseEdge path={edgePath} style={{ ...style, strokeDasharray: 'none', opacity: 0.5 }} markerEnd={markerEnd} />
-      <BaseEdge path={edgePath} style={style} className="animated-edge-path" />
+      {/* Solid track baseline */}
+      <BaseEdge path={edgePath} style={{ ...baseStyle, stroke: '#ffffff', strokeDasharray: 'none', strokeWidth: 1.5, opacity: 0.15 }} markerEnd={markerEnd} />
+      {/* Flowing light comet */}
+      <BaseEdge path={edgePath} style={{ ...baseStyle, stroke: `url(#${id}-gradient)`, strokeDasharray: 'none', strokeWidth: 1.5 }} className="glow-edge-path" />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -1916,6 +2157,10 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
   const [toast, setToast] = useState<{ message: string, visible: boolean }>({ message: '', visible: false });
   const [globalProgress, setGlobalProgress] = useState<{ visible: boolean, text: string, progress: number }>({ visible: false, text: '', progress: 0 });
   const [activeSidebarPopover, setActiveSidebarPopover] = useState<'add' | 'assets' | 'team-assets' | 'script' | null>(null);
+  const [assetsTab, setAssetsTab] = useState<'materials' | 'entities'>('materials');
+  const [materialsCategory, setMaterialsCategory] = useState('全部');
+  const [entitiesCategory, setEntitiesCategory] = useState('全部');
+  const [myEntities, setMyEntities] = useState<any[]>([]);
   const [activeRightPanel, setActiveRightPanel] = useState<{ type: MediaCapability, nodeId: string } | null>(null);
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
 
@@ -2655,6 +2900,11 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
     }, 2000);
   }, [updateNodeData, showToast]);
 
+  const openAssets = useCallback((tab: 'materials' | 'entities' = 'materials') => {
+    setActiveSidebarPopover('assets');
+    setAssetsTab(tab);
+  }, []);
+
   const addNode = (type: string, aiType?: string, pos?: { x: number, y: number }, sourceNodeId?: string, extraParams?: any) => {
     const id = `${type}-${Date.now()}`;
     const sourceNode = sourceNodeId ? getNode(sourceNodeId) : null;
@@ -3042,9 +3292,9 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
     if (type === 'textNode') {
       newNode = { id, type, position, style: { width: 320, height: 180 }, data: { text: '', onChange: handleTextChange, onAddNode: addNode, ...extraParams } };
     } else if (type === 'imageNode') {
-      newNode = { id, type, position, style: { width: extraParams?.initialWidth || 320, height: extraParams?.initialHeight || 320 }, data: { imageUrl: '', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate, onChange: handleImageChange, onAddNode: addNode, ...extraParams } };
+      newNode = { id, type, position, style: { width: extraParams?.initialWidth || 320, height: extraParams?.initialHeight || 320 }, data: { imageUrl: '', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate, onChange: handleImageChange, onAddNode: addNode, onOpenAssets: openAssets, ...extraParams } };
     } else if (type === 'videoNode') {
-      newNode = { id, type, position, style: { width: extraParams?.initialWidth || 320, height: extraParams?.initialHeight || 320 }, data: { videoUrl: '', onUpload: handleNodeFileUpload, onAddNode: addNode, ...extraParams } };
+      newNode = { id, type, position, style: { width: extraParams?.initialWidth || 320, height: extraParams?.initialHeight || 320 }, data: { videoUrl: '', onUpload: handleNodeFileUpload, onAddNode: addNode, onOpenAssets: openAssets, ...extraParams } };
     } else if (type === 'audioNode') {
       newNode = { id, type, position, style: { width: 320, height: 140 }, data: { audioUrl: '', onUpload: handleNodeFileUpload, onAddNode: addNode, ...extraParams } };
     } else if (type === 'scriptNode') {
@@ -3550,103 +3800,162 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
         {activeSidebarPopover === 'assets' && (
           <div className="bg-[#1C1C1E] border border-zinc-800/80 rounded-[20px] shadow-2xl w-[480px] h-[520px] flex flex-col animate-in fade-in zoom-in-95 duration-200 pointer-events-auto">
             <div className="flex items-center justify-between px-5 pt-5 pb-3">
-              <div className="flex items-baseline gap-3">
-                <h2 className="text-zinc-200 font-medium text-[15px]">我的素材</h2>
-                <span className="text-zinc-500 text-sm">我的主体库</span>
+              <div className="flex items-baseline gap-5 relative">
+                <button 
+                  onClick={() => setAssetsTab('materials')} 
+                  className={`font-medium text-[15px] transition-colors relative pb-1 ${assetsTab === 'materials' ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-400'}`}
+                >
+                  我的素材
+                  {assetsTab === 'materials' && <div className="absolute -bottom-1 left-0 right-0 h-0.5 bg-zinc-200 rounded-full" />}
+                </button>
+                <button 
+                  onClick={() => setAssetsTab('entities')} 
+                  className={`font-medium text-[15px] transition-colors relative pb-1 ${assetsTab === 'entities' ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-400'}`}
+                >
+                  我的主体库
+                  {assetsTab === 'entities' && <div className="absolute -bottom-1 left-0 right-0 h-0.5 bg-zinc-200 rounded-full" />}
+                </button>
               </div>
               <button onClick={() => setActiveSidebarPopover(null)} className="text-zinc-500 hover:text-white transition-colors">
                 <X size={18} />
               </button>
             </div>
             
-            <div className="flex items-center gap-6 px-5 pb-4 text-sm text-zinc-400 overflow-x-auto no-scrollbar border-b border-zinc-800/50">
-              <button className="shrink-0 bg-zinc-700/50 text-white px-3 py-1 rounded-md text-xs font-medium">全部</button>
-              <button className="shrink-0 hover:text-zinc-200 transition-colors text-xs font-medium">人物</button>
-              <button className="shrink-0 hover:text-zinc-200 transition-colors text-xs font-medium">场景</button>
-              <button className="shrink-0 hover:text-zinc-200 transition-colors text-xs font-medium">物品</button>
-              <button className="shrink-0 hover:text-zinc-200 transition-colors text-xs font-medium">风格</button>
-              <button className="shrink-0 hover:text-zinc-200 transition-colors text-xs font-medium">音效</button>
-              <button className="shrink-0 hover:text-zinc-200 transition-colors text-xs font-medium">其他</button>
-            </div>
-            
-            <div className="flex-1 p-5 overflow-y-auto grid grid-cols-3 gap-4">
-              {/* Mock items */}
-              <div 
-                className="flex flex-col gap-2 group cursor-pointer"
-                onClick={() => {
-                  const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                  const position = rect 
-                    ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                    : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                  
-                  const newNode = {
-                    id: `image-${Date.now()}`,
-                    type: 'imageNode',
-                    position,
-                    style: { width: 320, height: 320 },
-                    data: { imageUrl: 'https://images.unsplash.com/photo-1590483866874-5bebc2de714f?auto=format&fit=crop&q=80&w=400&h=400', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
-                  };
-                  setNodes(nds => nds.concat(newNode));
-                  showToast('已添加到画布');
-                  setActiveSidebarPopover(null);
-                }}
-              >
-                <div className="aspect-square bg-zinc-800 rounded-xl overflow-hidden relative border border-transparent group-hover:border-zinc-500 transition-colors">
-                  <img src="https://images.unsplash.com/photo-1590483866874-5bebc2de714f?auto=format&fit=crop&q=80&w=200&h=200" className="w-full h-full object-cover" alt="东吴居所关闭" />
+            {assetsTab === 'materials' && (
+              <>
+                <div className="flex items-center gap-6 px-5 pb-4 text-sm text-zinc-400 overflow-x-auto no-scrollbar border-b border-zinc-800/50">
+                  {['全部', '人物', '场景', '物品', '风格', '音效', '其他'].map(cat => (
+                    <button 
+                      key={cat} 
+                      onClick={() => setMaterialsCategory(cat)}
+                      className={`shrink-0 transition-colors text-xs font-medium ${materialsCategory === cat ? 'bg-zinc-700/50 text-white px-3 py-1 rounded-md' : 'hover:text-zinc-200'}`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
                 </div>
-                <span className="text-zinc-400 text-xs px-1 truncate">东吴居所关闭</span>
-              </div>
-              <div 
-                className="flex flex-col gap-2 group cursor-pointer"
-                onClick={() => {
-                  const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                  const position = rect 
-                    ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                    : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                  
-                  const newNode = {
-                    id: `image-${Date.now()}`,
-                    type: 'imageNode',
-                    position,
-                    style: { width: 320, height: 320 },
-                    data: { imageUrl: 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&q=80&w=400&h=400', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
-                  };
-                  setNodes(nds => nds.concat(newNode));
-                  showToast('已添加到画布');
-                  setActiveSidebarPopover(null);
-                }}
-              >
-                <div className="aspect-square bg-zinc-800 rounded-xl overflow-hidden relative border border-transparent group-hover:border-zinc-500 transition-colors">
-                  <img src="https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&q=80&w=200&h=200" className="w-full h-full object-cover" alt="图片素材" />
+                
+                <div className="flex-1 p-5 overflow-y-auto grid grid-cols-3 gap-4 custom-scrollbar">
+                  {nodes.filter(n => n.type === 'imageNode' && n.data?.imageUrl).map((node, i) => (
+                    <div 
+                      key={node.id}
+                      className="flex flex-col gap-2 group cursor-pointer relative"
+                      onClick={() => {
+                        const rect = reactFlowWrapper.current?.getBoundingClientRect();
+                        const position = rect 
+                          ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
+                          : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
+                        
+                        addNode('imageNode', undefined, position, undefined, { imageUrl: node.data.imageUrl });
+                        showToast('已添加到画布');
+                        setActiveSidebarPopover(null);
+                      }}
+                    >
+                      <div className="aspect-square bg-zinc-800 rounded-xl overflow-hidden relative border border-transparent group-hover:border-zinc-500 transition-colors">
+                        <img src={node.data.imageUrl} className="w-full h-full object-cover" alt={node.data.title || "图片素材"} />
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!myEntities.some(e => e.id === node.id)) {
+                              setMyEntities([...myEntities, { id: node.id, imageUrl: node.data.imageUrl, title: node.data.title || `主体 ${myEntities.length + 1}` }]);
+                              showToast('已添加到我的主体库');
+                            } else {
+                              showToast('主体库已存在该素材');
+                            }
+                          }}
+                          className="absolute bottom-2 right-2 p-1.5 bg-black/60 backdrop-blur-md rounded-lg text-white opacity-0 group-hover:opacity-100 hover:bg-[#00bcd4] transition-all"
+                          title="添加到主体库"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                      <span className="text-zinc-400 text-xs px-1 truncate">{node.data.title || '图片素材'}</span>
+                    </div>
+                  ))}
+                  {nodes.filter(n => n.type === 'imageNode' && n.data?.imageUrl).length === 0 && (
+                     <div className="col-span-3 text-center text-zinc-500 text-sm mt-10">
+                       画布中暂无图片素材
+                     </div>
+                  )}
                 </div>
-                <span className="text-zinc-400 text-xs px-1 truncate">图片素材</span>
-              </div>
-              <div 
-                className="flex flex-col gap-2 group cursor-pointer"
-                onClick={() => {
-                  const rect = reactFlowWrapper.current?.getBoundingClientRect();
-                  const position = rect 
-                    ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
-                    : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
-                  
-                  const newNode = {
-                    id: `image-${Date.now()}`,
-                    type: 'imageNode',
-                    position,
-                    style: { width: 320, height: 320 },
-                    data: { imageUrl: 'https://images.unsplash.com/photo-1542157585-ef20bfcce579?auto=format&fit=crop&q=80&w=400&h=400', onAction: handleImageAction, onUpload: handleNodeFileUpload, onGenerate: handleOpenGenerate }
-                  };
-                  setNodes(nds => nds.concat(newNode));
-                  showToast('已添加到画布');
-                  setActiveSidebarPopover(null);
-                }}
-              >
-                <div className="aspect-square bg-zinc-800 rounded-xl overflow-hidden relative border border-transparent group-hover:border-zinc-500 transition-colors">
-                  <img src="https://images.unsplash.com/photo-1542157585-ef20bfcce579?auto=format&fit=crop&q=80&w=200&h=200" className="w-full h-full object-cover" alt="图片素材" />
+              </>
+            )}
+
+            {assetsTab === 'entities' && (
+              <>
+                <div className="flex items-center justify-between px-5 pb-4 border-b border-zinc-800/50">
+                  <div className="flex items-center gap-6 text-sm text-zinc-400 overflow-x-auto no-scrollbar">
+                    {['全部', '人物', '场景', '道具', '特效', '其他'].map(cat => (
+                      <button 
+                        key={cat} 
+                        onClick={() => setEntitiesCategory(cat)}
+                        className={`shrink-0 transition-colors text-xs font-medium ${entitiesCategory === cat ? 'bg-[#00bcd4]/20 text-[#00bcd4] px-3 py-1 rounded-md' : 'hover:text-zinc-200'}`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="shrink-0 flex items-center gap-1.5 text-xs text-black bg-white hover:bg-zinc-200 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer">
+                    <Plus size={14} /> 新建主体
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                         const file = e.target.files?.[0];
+                         if (file) {
+                           const reader = new FileReader();
+                           reader.onload = (ev) => {
+                              const imageUrl = ev.target?.result as string;
+                              setMyEntities([...myEntities, { id: `entity-${Date.now()}`, imageUrl, title: file.name.replace(/\.[^/.]+$/, "") || '未命名主体' }]);
+                              showToast('已创建新主体');
+                           };
+                           reader.readAsDataURL(file);
+                         }
+                         // Reset input so the same file can be selected again
+                         e.target.value = '';
+                      }} 
+                    />
+                  </label>
                 </div>
-                <span className="text-zinc-400 text-xs px-1 truncate">图片素材</span>
-              </div>
-            </div>
+
+                <div className="flex-1 p-5 overflow-y-auto grid grid-cols-3 gap-4 custom-scrollbar content-start">
+                  {myEntities.map((entity, i) => (
+                    <div 
+                      key={entity.id}
+                      className="flex flex-col gap-2 group cursor-pointer"
+                      onClick={() => {
+                        const rect = reactFlowWrapper.current?.getBoundingClientRect();
+                        const position = rect 
+                          ? screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }) 
+                          : { x: window.innerWidth / 2 - 150, y: window.innerHeight / 2 - 150 };
+                        
+                        addNode('imageNode', undefined, position, undefined, { imageUrl: entity.imageUrl, title: entity.title });
+                        showToast(`已添加主体: ${entity.title}`);
+                        setActiveSidebarPopover(null);
+                      }}
+                    >
+                      <div className="aspect-square bg-zinc-800 rounded-xl overflow-hidden relative border-2 border-transparent group-hover:border-[#00bcd4] transition-colors shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
+                        <img src={entity.imageUrl} className="w-full h-full object-cover" alt={entity.title} />
+                        <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur-md rounded text-[9px] text-[#00bcd4] font-medium border border-[#00bcd4]/30">
+                          {entitiesCategory === '全部' ? '未分类' : entitiesCategory}
+                        </div>
+                      </div>
+                      <span className="text-zinc-300 text-xs px-1 font-medium truncate">{entity.title}</span>
+                    </div>
+                  ))}
+                  {myEntities.length === 0 && (
+                     <div className="col-span-3 flex flex-col items-center justify-center text-center text-zinc-500 text-sm mt-10 gap-3">
+                       <div className="w-12 h-12 rounded-2xl bg-zinc-800/50 flex items-center justify-center">
+                         <User size={24} className="text-zinc-600" />
+                       </div>
+                       <span>暂无主体资产</span>
+                       <span className="text-xs text-zinc-600">从「我的素材」中添加或手动上传</span>
+                     </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -3711,7 +4020,7 @@ function Canvas({ projectId, projectName, groupId, groupName, onBackToProjects }
           defaultEdgeOptions={{ 
             type: 'animated', 
             animated: true, 
-            style: { stroke: '#00bcd4', strokeWidth: 2.5, filter: 'drop-shadow(0 0 8px rgba(0,188,212,0.8))' }
+            style: { stroke: 'transparent' }
           }}
         >
           <Background color="rgba(255, 255, 255, 0.1)" gap={20} size={1} variant={BackgroundVariant.Dots} />
@@ -4385,12 +4694,12 @@ function ProjectSelectionOverlay({ onSelectProject, onClose, renderTopRight }: {
 import { GroupSelectionOverlay } from './workspace/GroupSelectionOverlay';
 import { ModernProjectSelection } from './workspace/ModernProjectSelection';
 
-export default function InfiniteCanvasWrapper({ onClose, renderTopRight }: { onClose?: () => void, renderTopRight?: React.ReactNode }) {
+export default function InfiniteCanvasWrapper({ onClose, renderTopRight, currentUser }: { onClose?: () => void, renderTopRight?: React.ReactNode, currentUser?: string }) {
   const [selectedGroup, setSelectedGroup] = useState<{id: string, name: string} | null>(null);
   const [selectedProject, setSelectedProject] = useState<{id: string, name: string} | null>(null);
 
   if (!selectedGroup) {
-    return <GroupSelectionOverlay onSelectGroup={(id, name) => setSelectedGroup({id, name})} onClose={onClose} renderTopRight={renderTopRight} />;
+    return <GroupSelectionOverlay onSelectGroup={(id, name) => setSelectedGroup({id, name})} onClose={onClose} renderTopRight={renderTopRight} currentUser={currentUser} />;
   }
 
   if (!selectedProject) {
@@ -4401,6 +4710,7 @@ export default function InfiniteCanvasWrapper({ onClose, renderTopRight }: { onC
       onBackToGroups={() => setSelectedGroup(null)}
       onClose={onClose} 
       renderTopRight={renderTopRight} 
+      currentUser={currentUser}
     />;
   }
 

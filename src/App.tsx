@@ -4,6 +4,7 @@ import InfiniteCanvasWrapper from './components/InfiniteCanvas';
 
 import { User, CreateUserInput, UpdateUserInput } from './types/user';
 import { UserService } from './services/userService';
+import { StatisticsOverlay } from './components/StatisticsOverlay';
 
 // User Management Types - Replaced by imported types in src/types/user.ts
 
@@ -148,6 +149,7 @@ function UserPasswordRow({ user, updatePassword }: { user: User, updatePassword:
 
 function CanvasAppRoute({ usersDB, currentUser, onLogout, setUsersDB, addAction }: { usersDB: User[], currentUser: string, onLogout: () => void, setUsersDB: React.Dispatch<React.SetStateAction<User[]>>, addAction: (actionStr: string) => void }) {
   const [showUsers, setShowUsers] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -200,15 +202,26 @@ function CanvasAppRoute({ usersDB, currentUser, onLogout, setUsersDB, addAction 
   const topControls = (
     <>
       {isAdmin && (
-        <button 
-          onClick={() => setShowUsers(true)}
-          className="px-4 py-2 bg-[#1C1C1E]/80 backdrop-blur-xl border border-zinc-800/80 hover:bg-zinc-800 rounded-2xl text-sm font-medium transition-colors flex items-center gap-2 text-white"
-        >
-          <svg className="w-4 h-4 text-[#00bcd4]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-          </svg>
-          用户管理
-        </button>
+        <>
+          <button 
+            onClick={() => setShowStats(true)}
+            className="px-4 py-2 bg-[#ff5722]/10 backdrop-blur-xl border border-[#ff5722]/30 hover:bg-[#ff5722]/20 rounded-2xl text-sm font-medium transition-colors flex items-center gap-2 text-[#ff5722]"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            使用统计
+          </button>
+          <button 
+            onClick={() => setShowUsers(true)}
+            className="px-4 py-2 bg-[#1C1C1E]/80 backdrop-blur-xl border border-zinc-800/80 hover:bg-zinc-800 rounded-2xl text-sm font-medium transition-colors flex items-center gap-2 text-white"
+          >
+            <svg className="w-4 h-4 text-[#00bcd4]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+            用户管理
+          </button>
+        </>
       )}
       <button 
         onClick={onLogout}
@@ -222,7 +235,7 @@ function CanvasAppRoute({ usersDB, currentUser, onLogout, setUsersDB, addAction 
   return (
     <>
       <div className="w-screen h-screen">
-        <InfiniteCanvasWrapper renderTopRight={topControls} />
+        <InfiniteCanvasWrapper renderTopRight={topControls} currentUser={currentUser} />
       </div>
 
       {showUsers && isAdmin && (
@@ -335,6 +348,10 @@ function CanvasAppRoute({ usersDB, currentUser, onLogout, setUsersDB, addAction 
             </div>
           </div>
         </div>
+      )}
+
+      {showStats && isAdmin && (
+        <StatisticsOverlay users={usersDB} onClose={() => setShowStats(false)} />
       )}
     </>
   );
